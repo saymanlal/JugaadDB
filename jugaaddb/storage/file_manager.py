@@ -1,21 +1,36 @@
 from pathlib import Path
+import struct
 
-from .constants import PAGE_SIZE
+from .constants import (
+    FILE_MAGIC,
+    FILE_VERSION,
+    HEADER_SIZE,
+    PAGE_SIZE,
+)
 from .page import Page
 
 
 class FileManager:
     """
-    Low-level manager for fixed-size pages inside a JugaadDB file.
+    Low-level fixed-page file manager for JugaadDB.
 
-    Responsibilities:
-    - Create/open database file
-    - Read pages
-    - Write pages
-    - Allocate new pages
-    - Report number of pages
+    File layout:
 
-    This layer knows nothing about tables, rows, schemas, or SQL.
+        Page 0
+        ┌──────────────────────────────┐
+        │ File Header                 │
+        │                              │
+        │ magic                       │
+        │ version                     │
+        │ reserved                    │
+        ├──────────────────────────────┤
+        │ Page Data                   │
+        │                              │
+        │ ...                         │
+        └──────────────────────────────┘
+
+    Page 0 is reserved for the database file header.
+    User/data pages start from page 1.
     """
 
     def __init__(self, path: str):
@@ -23,10 +38,9 @@ class FileManager:
 
     def create(self) -> None:
         """
-        Create an empty database file.
-
-        Fails if the file already exists.
+        Create a new JugaadDB file with a valid header.
         """
+
         if self.path.exists():
             raise FileExistsError(
                 f"Database file already exists: {self.path}"
@@ -37,15 +51,21 @@ class FileManager:
             exist_ok=True
         )
 
-        self.path.touch()
+        header = self._build_header()
+
+        # Page 0 contains header + zero padding.
+        page_zero = bytearray(PAGE_SIZE)
+        page_zero[:HEADER_SIZE] = header
+
+        with self.path.open("wb") as file:
+            file.write(page_zero)
+            file.flush()
 
     def open(self) -> None:
         """
-        Open an existing database file.
-
-        The current implementation keeps file access simple
-        and opens files per operation.
+        Validate that an existing file is a JugaadDB file.
         """
+
         if not self.path.exists():
             raise FileNotFoundError(
                 f"Database file does not exist: {self.path}"
@@ -56,28 +76,54 @@ class FileManager:
                 f"Database path is not a file: {self.path}"
             )
 
-    def page_count(self) -> int:
-        """
-        Return the number of complete pages in the file.
-        """
-        self.open()
-
-        size = self.path.stat().st_size
-
-        if size % PAGE_SIZE != 0:
+        if self.path.stat().st_size < PAGE_SIZE:
             raise ValueError(
-                "Database file is corrupted: "
-                "file size is not aligned to page size."
+                "Invalid JugaadDB file: file is too small."
             )
 
-        return size // PAGE_SIZE
+        if self.path.stat().st_size % PAGE_SIZE != 0:
+            raise ValueError(
+                "Invalid JugaadDB file: "
+                "file size is not page aligned."
+            )
+
+        self._validate_header()
+
+    def page_count(self) -> int:
+        """
+        Return total number of physical pages.
+
+        Page 0 is the file header page.
+        """
+
+        self.open()
+
+        return self.path.stat().st_size // PAGE_SIZE
+
+    def data_page_count(self) -> int:
+        """
+        Return number of pages available for actual data.
+
+        Page 0 is reserved for the header.
+        """
+
+        return max(0, self.page_count() - 1)
 
     def read_page(self, page_id: int) -> Page:
         """
-        Read a page from disk.
+        Read a physical page from disk.
+
+        Page 0 is the header page and cannot be returned
+        as a normal Page object.
         """
+
         self._validate_page_id(page_id)
         self.open()
+
+        if page_id == 0:
+            raise ValueError(
+                "Page 0 is reserved for the file header."
+            )
 
         if page_id >= self.page_count():
             raise ValueError(
@@ -99,16 +145,25 @@ class FileManager:
 
     def write_page(self, page: Page) -> None:
         """
-        Write a page to disk.
-
-        Existing pages are overwritten.
-        New pages extend the file.
+        Write an existing physical page to disk.
         """
+
         self.open()
 
         if not isinstance(page, Page):
             raise TypeError(
                 "write_page expects a Page instance."
+            )
+
+        if page.page_id == 0:
+            raise ValueError(
+                "Page 0 is reserved for the file header."
+            )
+
+        if page.page_id >= self.page_count():
+            raise ValueError(
+                f"Cannot overwrite non-existent page: "
+                f"{page.page_id}"
             )
 
         offset = page.page_id * PAGE_SIZE
@@ -120,13 +175,13 @@ class FileManager:
 
     def allocate_page(self) -> Page:
         """
-        Allocate a new empty page at the end of the file.
-
-        Returns the newly allocated Page object.
+        Allocate a new data page at the end of the file.
         """
+
         self.open()
 
         page_id = self.page_count()
+
         page = Page(page_id)
 
         with self.path.open("ab") as file:
@@ -134,6 +189,41 @@ class FileManager:
             file.flush()
 
         return page
+
+    def _build_header(self) -> bytes:
+        """
+        Build the fixed-size file header.
+        """
+
+        header = bytearray(HEADER_SIZE)
+
+        header[:len(FILE_MAGIC)] = FILE_MAGIC
+
+        # One unsigned byte for format version.
+        header[8] = FILE_VERSION
+
+        return bytes(header)
+
+    def _validate_header(self) -> None:
+        """
+        Validate file magic and format version.
+        """
+
+        with self.path.open("rb") as file:
+            header = file.read(HEADER_SIZE)
+
+        magic = header[:len(FILE_MAGIC)]
+        version = header[8]
+
+        if magic != FILE_MAGIC:
+            raise ValueError(
+                "Invalid JugaadDB file: bad magic."
+            )
+
+        if version != FILE_VERSION:
+            raise ValueError(
+                f"Unsupported JugaadDB file version: {version}"
+            )
 
     def _validate_page_id(self, page_id: int) -> None:
         if not isinstance(page_id, int):
