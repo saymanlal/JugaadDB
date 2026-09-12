@@ -1,0 +1,43 @@
+{
+  "header": {
+    "magic": "JUGAADDB",
+    "version": 1
+  },
+  "catalog": {
+    "tables": {
+      "students": {
+        "schema": [
+          {
+            "name": "id",
+            "data_type": "INTEGER",
+            "primary_key": true,
+            "nullable": false,
+            "unique": false
+          },
+          {
+            "name": "name",
+            "data_type": "TEXT",
+            "primary_key": false,
+            "nullable": false,
+            "unique": false
+          },
+          {
+            "name": "branch",
+            "data_type": "TEXT",
+            "primary_key": false,
+            "nullable": true,
+            "unique": false
+          },
+          {
+            "name": "cgpa",
+            "data_type": "FLOAT",
+            "primary_key": false,
+            "nullable": true,
+            "unique": false
+          }
+        ],
+        "rows": []
+      }
+    }
+  }
+}
