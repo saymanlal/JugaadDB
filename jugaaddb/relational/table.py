@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Callable
 
 from ..core.schema import Schema
 
@@ -8,11 +8,13 @@ class Table:
         self,
         name: str,
         schema: Schema,
-        storage: dict[str, Any]
+        storage: dict[str, Any],
+        save_callback: Callable[[], None] | None = None
     ):
         self.name = name
         self.schema = schema
         self.storage = storage
+        self._save_callback = save_callback
 
         self.storage.setdefault("rows", [])
 
@@ -31,10 +33,18 @@ class Table:
             for column in self.schema.columns
         }
 
+        # Add row to memory
         self.rows.append(normalized)
+
+        # Persist row to database file
+        self._save()
 
     def select_all(self) -> list[dict[str, Any]]:
         return [row.copy() for row in self.rows]
+
+    def _save(self) -> None:
+        if self._save_callback is not None:
+            self._save_callback()
 
     def _check_primary_key(self, row: dict[str, Any]) -> None:
         primary_key = next(

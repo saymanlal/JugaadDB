@@ -65,10 +65,11 @@ class Database:
         self._save()
 
         return Table(
-            name,
-            schema,
-            tables[name]
-        )
+           name,
+           schema,
+           tables[name],
+           self._save
+         )
 
     def table(self, name: str) -> Table:
         tables = self.data["catalog"]["tables"]
@@ -92,10 +93,11 @@ class Database:
         ])
 
         return Table(
-            name,
-            schema,
-            table_data
-        )
+           name,
+           schema,
+           tables[name],
+           self._save
+         )
 
     def _save(self) -> None:
         self.storage.save(self.data)

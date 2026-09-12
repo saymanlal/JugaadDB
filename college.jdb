@@ -36,7 +36,20 @@
             "unique": false
           }
         ],
-        "rows": []
+        "rows": [
+          {
+            "id": 1,
+            "name": "Sayman",
+            "branch": "CSE",
+            "cgpa": 8.5
+          },
+          {
+            "id": 2,
+            "name": "Rahul",
+            "branch": "CSE",
+            "cgpa": 9.1
+          }
+        ]
       }
     }
   }
