@@ -2,8 +2,9 @@ from pathlib import Path
 from typing import Any
 
 from .schema import Column, Schema
-from ..storage.engine import StorageEngine
+from ..indexing.manager import IndexManager
 from ..relational.table import Table
+from ..storage.engine import StorageEngine
 
 
 class Database:
@@ -12,23 +13,45 @@ class Database:
         path: str,
         storage: StorageEngine,
         data: dict[str, Any],
+        index_manager: IndexManager | None = None,
     ):
         self.path = Path(path)
         self.storage = storage
         self.data = data
+        self.index_manager = (
+            index_manager
+            if index_manager is not None
+            else IndexManager()
+        )
 
     @classmethod
-    def create(cls, path: str) -> "Database":
+    def create(
+        cls,
+        path: str,
+    ) -> "Database":
         storage = StorageEngine(path)
         storage.create()
         data = storage.load()
-        return cls(path, storage, data)
+
+        return cls(
+            path,
+            storage,
+            data,
+        )
 
     @classmethod
-    def open(cls, path: str) -> "Database":
+    def open(
+        cls,
+        path: str,
+    ) -> "Database":
         storage = StorageEngine(path)
         data = storage.load()
-        return cls(path, storage, data)
+
+        return cls(
+            path,
+            storage,
+            data,
+        )
 
     def create_table(
         self,
@@ -56,6 +79,7 @@ class Database:
                 for column in schema.columns
             ],
             "rows": [],
+            "record_ids": [],
         }
 
         self._save()
@@ -65,9 +89,13 @@ class Database:
             schema,
             tables[name],
             self._save,
+            self.index_manager,
         )
 
-    def table(self, name: str) -> Table:
+    def table(
+        self,
+        name: str,
+    ) -> Table:
         tables = self.data["catalog"]["tables"]
 
         if name not in tables:
@@ -95,9 +123,13 @@ class Database:
             schema,
             table_data,
             self._save,
+            self.index_manager,
         )
 
-    def execute(self, sql: str):
+    def execute(
+        self,
+        sql: str,
+    ):
         from ..sql.executor import Executor
         from ..sql.lexer import Lexer
         from ..sql.parser import Parser
@@ -115,9 +147,13 @@ class Database:
 
         tokens = Lexer(sql).tokenize()
         statement = Parser(tokens).parse()
-        plan = Planner().plan(statement)
+        plan = Planner(self).plan(statement)
 
-        return Executor(self).execute(plan)
+        return Executor(self).execute(
+            plan
+        )
 
     def _save(self) -> None:
-        self.storage.save(self.data)
+        self.storage.save(
+            self.data
+        )

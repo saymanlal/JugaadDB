@@ -2,6 +2,7 @@ from .ast import (
     Assignment,
     BinaryExpression,
     ColumnDefinition,
+    CreateIndexStatement,
     CreateTableStatement,
     DeleteStatement,
     Identifier,
@@ -47,7 +48,7 @@ class Parser:
             statement = self._parse_delete()
 
         elif self.current.type == TokenType.CREATE:
-            statement = self._parse_create_table()
+            statement = self._parse_create()
 
         else:
             raise SyntaxError(
@@ -83,6 +84,21 @@ class Parser:
             )
 
         return self.advance()
+
+    def _parse_create(self):
+        self.expect(TokenType.CREATE)
+
+        if self.current.type == TokenType.TABLE:
+            return self._parse_create_table()
+
+        if self.current.type == TokenType.INDEX:
+            return self._parse_create_index()
+
+        raise SyntaxError(
+            f"Expected TABLE or INDEX, got "
+            f"{self.current.type.name} "
+            f"at position {self.current.position}."
+        )
 
     def _parse_select(self) -> SelectStatement:
         self.expect(TokenType.SELECT)
@@ -273,7 +289,6 @@ class Parser:
         )
 
     def _parse_create_table(self) -> CreateTableStatement:
-        self.expect(TokenType.CREATE)
         self.expect(TokenType.TABLE)
 
         table = self._parse_identifier()
@@ -336,6 +351,27 @@ class Parser:
         return CreateTableStatement(
             table=table,
             columns=tuple(columns),
+        )
+
+    def _parse_create_index(self) -> CreateIndexStatement:
+        self.expect(TokenType.INDEX)
+
+        index = self._parse_identifier()
+
+        self.expect(TokenType.ON)
+
+        table = self._parse_identifier()
+
+        self.expect(TokenType.LEFT_PAREN)
+
+        column = self._parse_identifier()
+
+        self.expect(TokenType.RIGHT_PAREN)
+
+        return CreateIndexStatement(
+            index=index,
+            table=table,
+            column=column,
         )
 
     def _parse_identifier_list(self) -> list[Identifier]:

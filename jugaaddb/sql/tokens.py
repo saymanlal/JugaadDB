@@ -11,6 +11,8 @@ class TokenType(Enum):
     VALUES = auto()
     CREATE = auto()
     TABLE = auto()
+    INDEX = auto()
+    ON = auto()
     UPDATE = auto()
     SET = auto()
     DELETE = auto()

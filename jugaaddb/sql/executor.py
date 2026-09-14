@@ -8,15 +8,18 @@ from .ast import (
 )
 from .errors import SQLExecutionError
 from .plan import (
+    CreateIndexPlan,
     CreateTablePlan,
     DeletePlan,
     Filter,
+    IndexScan,
     InsertPlan,
     Projection,
     TableScan,
     UpdatePlan,
 )
 from .result import CommandResult, QueryResult
+from ..indexing.scan import IndexScan as IndexScanner
 
 
 class Executor:
@@ -32,6 +35,7 @@ class Executor:
                 UpdatePlan,
                 DeletePlan,
                 CreateTablePlan,
+                CreateIndexPlan,
             ),
         ):
             raise TypeError(
@@ -54,6 +58,9 @@ class Executor:
 
             if isinstance(plan, CreateTablePlan):
                 return self._execute_create_table(plan)
+
+            if isinstance(plan, CreateIndexPlan):
+                return self._execute_create_index(plan)
 
         except SQLExecutionError:
             raise
@@ -127,6 +134,23 @@ class Executor:
 
             return table.select_all()
 
+        if isinstance(source, IndexScan):
+            rows = self._execute_planned_index_scan(
+                source
+            )
+
+            if source.condition is None:
+                return rows
+
+            return [
+                row
+                for row in rows
+                if self._evaluate(
+                    source.condition,
+                    row,
+                )
+            ]
+
         if isinstance(source, Filter):
             table = self._get_table(
                 source.source
@@ -136,6 +160,21 @@ class Executor:
                 source.condition,
                 table,
             )
+
+            indexed_rows = self._execute_index_scan(
+                source.condition,
+                table,
+            )
+
+            if indexed_rows is not None:
+                return [
+                    row
+                    for row in indexed_rows
+                    if self._evaluate(
+                        source.condition,
+                        row,
+                    )
+                ]
 
             rows = self._execute_source(
                 source.source
@@ -153,6 +192,144 @@ class Executor:
         raise SQLExecutionError(
             f"Unsupported execution source: "
             f"{type(source).__name__}"
+        )
+
+    def _execute_planned_index_scan(
+        self,
+        plan,
+    ):
+        table = self.database.table(
+            plan.table.name
+        )
+
+        available_columns = {
+            column.name
+            for column in table.schema.columns
+        }
+
+        self._validate_columns_exist(
+            [plan.column.name],
+            available_columns,
+        )
+
+        indexes = (
+            self.database.index_manager
+            .indexes_for_column(
+                table.name,
+                plan.column.name,
+            )
+        )
+
+        index = next(
+            (
+                candidate
+                for candidate in indexes
+                if candidate.name == plan.index.name
+            ),
+            None,
+        )
+
+        if index is None:
+            raise SQLExecutionError(
+                f"Index does not exist: {plan.index.name}"
+            )
+
+        record_ids = IndexScanner(
+            index
+        ).exact(
+            plan.value
+        )
+
+        rows = []
+
+        for record_id in record_ids:
+            try:
+                row = table.row_by_record_id(
+                    record_id
+                )
+            except ValueError as error:
+                raise SQLExecutionError(
+                    str(error)
+                ) from error
+
+            rows.append(row)
+
+        return rows
+
+    def _execute_index_scan(
+        self,
+        condition,
+        table,
+    ):
+        parsed = self._extract_indexable_equality(
+            condition
+        )
+
+        if parsed is None:
+            return None
+
+        column, value = parsed
+
+        indexes = (
+            self.database.index_manager
+            .indexes_for_column(
+                table.name,
+                column,
+            )
+        )
+
+        if not indexes:
+            return None
+
+        index = indexes[0]
+        scan = IndexScanner(index)
+
+        record_ids = scan.exact(value)
+
+        rows = []
+
+        for record_id in record_ids:
+            try:
+                row = table.row_by_record_id(
+                    record_id
+                )
+            except ValueError as error:
+                raise SQLExecutionError(
+                    str(error)
+                ) from error
+
+            rows.append(row)
+
+        return rows
+
+    def _extract_indexable_equality(
+        self,
+        condition,
+    ):
+        if not isinstance(
+            condition,
+            BinaryExpression,
+        ):
+            return None
+
+        if condition.operator != "=":
+            return None
+
+        if not isinstance(
+            condition.left,
+            Identifier,
+        ):
+            return None
+
+        if not isinstance(
+            condition.right,
+            Literal,
+        ):
+            return None
+
+        return (
+            condition.left.name,
+            condition.right.value,
         )
 
     def _execute_insert(self, plan):
@@ -348,6 +525,55 @@ class Executor:
             query_type="CREATE TABLE",
         )
 
+    def _execute_create_index(self, plan):
+        table = self.database.table(
+            plan.table.name
+        )
+
+        available_columns = {
+            column.name
+            for column in table.schema.columns
+        }
+
+        self._validate_columns_exist(
+            [plan.column.name],
+            available_columns,
+        )
+
+        if self.database.index_manager.indexes_for_column(
+            plan.table.name,
+            plan.column.name,
+        ):
+            raise SQLExecutionError(
+                f"An index already exists for column: "
+                f"{plan.column.name}"
+            )
+
+        index = self.database.index_manager.create_index(
+            table_name=plan.table.name,
+            index_name=plan.index.name,
+            column=plan.column.name,
+            index_type="btree",
+        )
+
+        for record_id, row in table.select_all_with_ids():
+            value = row.get(
+                plan.column.name
+            )
+
+            if value is None:
+                continue
+
+            index.insert(
+                value,
+                record_id,
+            )
+
+        return CommandResult(
+            affected_rows=1,
+            query_type="CREATE INDEX",
+        )
+
     def _evaluate(
         self,
         expression,
@@ -494,6 +720,14 @@ class Executor:
                 source.table.name
             )
 
+        if isinstance(
+            source,
+            IndexScan,
+        ):
+            return self.database.table(
+                source.table.name
+            )
+
         raise SQLExecutionError(
             f"Cannot determine table from: "
             f"{type(source).__name__}"
@@ -532,6 +766,16 @@ class Executor:
                 source.condition,
                 table,
             )
+
+        elif isinstance(
+            source,
+            IndexScan,
+        ):
+            if source.condition is not None:
+                self._validate_expression_columns(
+                    source.condition,
+                    table,
+                )
 
     def _validate_expression_columns(
         self,
@@ -612,6 +856,12 @@ class Executor:
         self,
         source,
     ):
+        if isinstance(
+            source,
+            IndexScan,
+        ):
+            return
+
         if not isinstance(
             source,
             Filter,

@@ -16,6 +16,15 @@ class Filter:
 
 
 @dataclass(frozen=True)
+class IndexScan:
+    table: Identifier
+    index: Identifier
+    column: Identifier
+    value: Any
+    condition: Any = None
+
+
+@dataclass(frozen=True)
 class Projection:
     source: Any
     columns: tuple[Identifier, ...]
@@ -43,3 +52,10 @@ class DeletePlan:
 class CreateTablePlan:
     table: Identifier
     columns: tuple[Any, ...]
+
+
+@dataclass(frozen=True)
+class CreateIndexPlan:
+    index: Identifier
+    table: Identifier
+    column: Identifier
