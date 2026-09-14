@@ -66,6 +66,13 @@ class CreateTableStatement:
 
 
 @dataclass(frozen=True)
+class CreateIndexStatement:
+    index: Identifier
+    table: Identifier
+    column: Identifier
+
+
+@dataclass(frozen=True)
 class ColumnDefinition:
     name: Identifier
     data_type: Identifier

@@ -11,6 +11,8 @@ class Lexer:
         "VALUES": TokenType.VALUES,
         "CREATE": TokenType.CREATE,
         "TABLE": TokenType.TABLE,
+        "INDEX": TokenType.INDEX,
+        "ON": TokenType.ON,
         "UPDATE": TokenType.UPDATE,
         "SET": TokenType.SET,
         "DELETE": TokenType.DELETE,
