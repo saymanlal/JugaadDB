@@ -1,0 +1,244 @@
+from .ast import (
+    BinaryExpression,
+    ColumnDefinition,
+    CreateTableStatement,
+    Identifier,
+    InsertStatement,
+    Literal,
+    SelectStatement,
+)
+from .tokens import Token, TokenType
+
+
+class Parser:
+    COMPARISON_OPERATORS = {
+        TokenType.EQUAL: "=",
+        TokenType.NOT_EQUAL: "!=",
+        TokenType.LESS_THAN: "<",
+        TokenType.LESS_EQUAL: "<=",
+        TokenType.GREATER_THAN: ">",
+        TokenType.GREATER_EQUAL: ">=",
+    }
+
+    def __init__(self, tokens: list[Token]):
+        if not isinstance(tokens, list):
+            raise TypeError("Tokens must be provided as a list.")
+        self.tokens = tokens
+        self.position = 0
+
+    def parse(self):
+        if self.current.type == TokenType.SELECT:
+            statement = self._parse_select()
+        elif self.current.type == TokenType.INSERT:
+            statement = self._parse_insert()
+        elif self.current.type == TokenType.CREATE:
+            statement = self._parse_create_table()
+        else:
+            raise SyntaxError(
+                f"Unsupported statement: {self.current.value or self.current.type.name}"
+            )
+
+        if self.current.type == TokenType.SEMICOLON:
+            self.advance()
+
+        self.expect(TokenType.EOF)
+        return statement
+
+    @property
+    def current(self) -> Token:
+        return self.tokens[self.position]
+
+    def advance(self) -> Token:
+        token = self.current
+        if self.position < len(self.tokens) - 1:
+            self.position += 1
+        return token
+
+    def expect(self, token_type: TokenType) -> Token:
+        if self.current.type != token_type:
+            raise SyntaxError(
+                f"Expected {token_type.name}, got {self.current.type.name} "
+                f"at position {self.current.position}."
+            )
+        return self.advance()
+
+    def _parse_select(self) -> SelectStatement:
+        self.expect(TokenType.SELECT)
+
+        columns = self._parse_column_list()
+
+        self.expect(TokenType.FROM)
+
+        table = self._parse_identifier()
+
+        where = None
+
+        if self.current.type == TokenType.WHERE:
+            self.advance()
+            where = self._parse_condition()
+
+        return SelectStatement(
+            columns=tuple(columns),
+            table=table,
+            where=where,
+        )
+
+    def _parse_column_list(self) -> list[Identifier]:
+        columns = []
+
+        if self.current.type == TokenType.MULTIPLY:
+            self.advance()
+            return [Identifier("*")]
+
+        columns.append(self._parse_identifier())
+
+        while self.current.type == TokenType.COMMA:
+            self.advance()
+            columns.append(self._parse_identifier())
+
+        return columns
+
+    def _parse_condition(self) -> BinaryExpression:
+        left = self._parse_identifier()
+
+        operator_token = self.current
+
+        if operator_token.type not in self.COMPARISON_OPERATORS:
+            raise SyntaxError(
+                f"Expected comparison operator, got "
+                f"{operator_token.type.name} at position "
+                f"{operator_token.position}."
+            )
+
+        operator = self.COMPARISON_OPERATORS[operator_token.type]
+        self.advance()
+
+        right = self._parse_literal()
+
+        return BinaryExpression(
+            left=left,
+            operator=operator,
+            right=right,
+        )
+
+    def _parse_insert(self) -> InsertStatement:
+        self.expect(TokenType.INSERT)
+        self.expect(TokenType.INTO)
+
+        table = self._parse_identifier()
+
+        self.expect(TokenType.LEFT_PAREN)
+
+        columns = self._parse_identifier_list()
+
+        self.expect(TokenType.RIGHT_PAREN)
+        self.expect(TokenType.VALUES)
+        self.expect(TokenType.LEFT_PAREN)
+
+        values = self._parse_literal_list()
+
+        self.expect(TokenType.RIGHT_PAREN)
+
+        if len(columns) != len(values):
+            raise SyntaxError(
+                "Number of columns must match number of values."
+            )
+
+        return InsertStatement(
+            table=table,
+            columns=tuple(columns),
+            values=tuple(values),
+        )
+
+    def _parse_create_table(self) -> CreateTableStatement:
+        self.expect(TokenType.CREATE)
+        self.expect(TokenType.TABLE)
+
+        table = self._parse_identifier()
+
+        self.expect(TokenType.LEFT_PAREN)
+
+        columns = []
+
+        while True:
+            name = self._parse_identifier()
+            data_type = self._parse_identifier()
+
+            primary_key = False
+            unique = False
+
+            if self.current.type == TokenType.PRIMARY:
+                self.advance()
+                self.expect(TokenType.KEY)
+                primary_key = True
+
+            if self.current.type == TokenType.UNIQUE:
+                self.advance()
+                unique = True
+
+            columns.append(
+                ColumnDefinition(
+                    name=name,
+                    data_type=data_type,
+                    primary_key=primary_key,
+                    unique=unique,
+                )
+            )
+
+            if self.current.type != TokenType.COMMA:
+                break
+
+            self.advance()
+
+        self.expect(TokenType.RIGHT_PAREN)
+
+        return CreateTableStatement(
+            table=table,
+            columns=tuple(columns),
+        )
+
+    def _parse_identifier_list(self) -> list[Identifier]:
+        identifiers = [self._parse_identifier()]
+
+        while self.current.type == TokenType.COMMA:
+            self.advance()
+            identifiers.append(self._parse_identifier())
+
+        return identifiers
+
+    def _parse_literal_list(self) -> list[Literal]:
+        values = [self._parse_literal()]
+
+        while self.current.type == TokenType.COMMA:
+            self.advance()
+            values.append(self._parse_literal())
+
+        return values
+
+    def _parse_identifier(self) -> Identifier:
+        token = self.expect(TokenType.IDENTIFIER)
+        return Identifier(token.value)
+
+    def _parse_literal(self) -> Literal:
+        token = self.current
+
+        if token.type == TokenType.INTEGER:
+            self.advance()
+            return Literal(int(token.value))
+
+        if token.type == TokenType.FLOAT:
+            self.advance()
+            return Literal(float(token.value))
+
+        if token.type == TokenType.STRING:
+            self.advance()
+            return Literal(token.value)
+
+        if token.type == TokenType.NULL:
+            self.advance()
+            return Literal(None)
+
+        raise SyntaxError(
+            f"Expected literal, got {token.type.name} "
+            f"at position {token.position}."
+        )
