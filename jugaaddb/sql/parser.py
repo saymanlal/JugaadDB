@@ -1,11 +1,15 @@
 from .ast import (
+    Assignment,
     BinaryExpression,
     ColumnDefinition,
     CreateTableStatement,
+    DeleteStatement,
     Identifier,
     InsertStatement,
     Literal,
+    LogicalExpression,
     SelectStatement,
+    UpdateStatement,
 )
 from .tokens import Token, TokenType
 
@@ -20,6 +24,11 @@ class Parser:
         TokenType.GREATER_EQUAL: ">=",
     }
 
+    LOGICAL_OPERATORS = {
+        TokenType.AND: "AND",
+        TokenType.OR: "OR",
+    }
+
     def __init__(self, tokens: list[Token]):
         if not isinstance(tokens, list):
             raise TypeError("Tokens must be provided as a list.")
@@ -31,11 +40,16 @@ class Parser:
             statement = self._parse_select()
         elif self.current.type == TokenType.INSERT:
             statement = self._parse_insert()
+        elif self.current.type == TokenType.UPDATE:
+            statement = self._parse_update()
+        elif self.current.type == TokenType.DELETE:
+            statement = self._parse_delete()
         elif self.current.type == TokenType.CREATE:
             statement = self._parse_create_table()
         else:
             raise SyntaxError(
-                f"Unsupported statement: {self.current.value or self.current.type.name}"
+                f"Unsupported statement: "
+                f"{self.current.value or self.current.type.name}"
             )
 
         if self.current.type == TokenType.SEMICOLON:
@@ -57,7 +71,8 @@ class Parser:
     def expect(self, token_type: TokenType) -> Token:
         if self.current.type != token_type:
             raise SyntaxError(
-                f"Expected {token_type.name}, got {self.current.type.name} "
+                f"Expected {token_type.name}, got "
+                f"{self.current.type.name} "
                 f"at position {self.current.position}."
             )
         return self.advance()
@@ -75,7 +90,7 @@ class Parser:
 
         if self.current.type == TokenType.WHERE:
             self.advance()
-            where = self._parse_condition()
+            where = self._parse_expression()
 
         return SelectStatement(
             columns=tuple(columns),
@@ -98,7 +113,35 @@ class Parser:
 
         return columns
 
-    def _parse_condition(self) -> BinaryExpression:
+    def _parse_expression(self):
+        expression = self._parse_comparison()
+
+        while self.current.type == TokenType.OR:
+            self.advance()
+            right = self._parse_comparison()
+            expression = LogicalExpression(
+                left=expression,
+                operator="OR",
+                right=right,
+            )
+
+        return expression
+
+    def _parse_comparison(self):
+        expression = self._parse_comparison_part()
+
+        while self.current.type == TokenType.AND:
+            self.advance()
+            right = self._parse_comparison_part()
+            expression = LogicalExpression(
+                left=expression,
+                operator="AND",
+                right=right,
+            )
+
+        return expression
+
+    def _parse_comparison_part(self) -> BinaryExpression:
         left = self._parse_identifier()
 
         operator_token = self.current
@@ -106,8 +149,8 @@ class Parser:
         if operator_token.type not in self.COMPARISON_OPERATORS:
             raise SyntaxError(
                 f"Expected comparison operator, got "
-                f"{operator_token.type.name} at position "
-                f"{operator_token.position}."
+                f"{operator_token.type.name} "
+                f"at position {operator_token.position}."
             )
 
         operator = self.COMPARISON_OPERATORS[operator_token.type]
@@ -148,6 +191,63 @@ class Parser:
             table=table,
             columns=tuple(columns),
             values=tuple(values),
+        )
+
+    def _parse_update(self) -> UpdateStatement:
+        self.expect(TokenType.UPDATE)
+
+        table = self._parse_identifier()
+
+        self.expect(TokenType.SET)
+
+        assignments = []
+
+        while True:
+            column = self._parse_identifier()
+
+            self.expect(TokenType.EQUAL)
+
+            value = self._parse_literal()
+
+            assignments.append(
+                Assignment(
+                    column=column,
+                    value=value,
+                )
+            )
+
+            if self.current.type != TokenType.COMMA:
+                break
+
+            self.advance()
+
+        where = None
+
+        if self.current.type == TokenType.WHERE:
+            self.advance()
+            where = self._parse_expression()
+
+        return UpdateStatement(
+            table=table,
+            assignments=tuple(assignments),
+            where=where,
+        )
+
+    def _parse_delete(self) -> DeleteStatement:
+        self.expect(TokenType.DELETE)
+        self.expect(TokenType.FROM)
+
+        table = self._parse_identifier()
+
+        where = None
+
+        if self.current.type == TokenType.WHERE:
+            self.advance()
+            where = self._parse_expression()
+
+        return DeleteStatement(
+            table=table,
+            where=where,
         )
 
     def _parse_create_table(self) -> CreateTableStatement:

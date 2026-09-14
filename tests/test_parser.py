@@ -196,3 +196,180 @@ def test_unsupported_statement():
         assert False
     except SyntaxError:
         pass
+    
+from jugaaddb.sql.ast import (
+    Assignment,
+    DeleteStatement,
+    LogicalExpression,
+    UpdateStatement,
+)
+
+def test_update():
+    statement = parse(
+        "UPDATE students SET cgpa = 9.5 WHERE id = 1;"
+    )
+
+    assert isinstance(statement, UpdateStatement)
+    assert statement.table == Identifier("students")
+    assert statement.assignments == (
+        Assignment(
+            column=Identifier("cgpa"),
+            value=Literal(9.5),
+        ),
+    )
+    assert statement.where == BinaryExpression(
+        left=Identifier("id"),
+        operator="=",
+        right=Literal(1),
+    )
+
+
+def test_update_multiple_columns():
+    statement = parse(
+        "UPDATE students SET name = 'Rahul', cgpa = 9.1 WHERE id = 2;"
+    )
+
+    assert statement.assignments == (
+        Assignment(
+            column=Identifier("name"),
+            value=Literal("Rahul"),
+        ),
+        Assignment(
+            column=Identifier("cgpa"),
+            value=Literal(9.1),
+        ),
+    )
+
+
+def test_update_without_where():
+    statement = parse(
+        "UPDATE students SET cgpa = 9.9;"
+    )
+
+    assert statement.where is None
+
+
+def test_delete():
+    statement = parse(
+        "DELETE FROM students WHERE id = 1;"
+    )
+
+    assert isinstance(statement, DeleteStatement)
+    assert statement.table == Identifier("students")
+    assert statement.where == BinaryExpression(
+        left=Identifier("id"),
+        operator="=",
+        right=Literal(1),
+    )
+
+
+def test_delete_without_where():
+    statement = parse("DELETE FROM students;")
+
+    assert isinstance(statement, DeleteStatement)
+    assert statement.where is None
+
+
+def test_and_expression():
+    statement = parse(
+        """
+        SELECT name
+        FROM students
+        WHERE cgpa > 8.0 AND department = 'CSE';
+        """
+    )
+
+    assert statement.where == LogicalExpression(
+        left=BinaryExpression(
+            left=Identifier("cgpa"),
+            operator=">",
+            right=Literal(8.0),
+        ),
+        operator="AND",
+        right=BinaryExpression(
+            left=Identifier("department"),
+            operator="=",
+            right=Literal("CSE"),
+        ),
+    )
+
+
+def test_or_expression():
+    statement = parse(
+        """
+        SELECT name
+        FROM students
+        WHERE department = 'CSE' OR department = 'AIML';
+        """
+    )
+
+    assert statement.where == LogicalExpression(
+        left=BinaryExpression(
+            left=Identifier("department"),
+            operator="=",
+            right=Literal("CSE"),
+        ),
+        operator="OR",
+        right=BinaryExpression(
+            left=Identifier("department"),
+            operator="=",
+            right=Literal("AIML"),
+        ),
+    )
+
+
+def test_and_has_higher_precedence_than_or():
+    statement = parse(
+        """
+        SELECT name
+        FROM students
+        WHERE id = 1 OR id = 2 AND cgpa > 8.0;
+        """
+    )
+
+    assert statement.where == LogicalExpression(
+        left=BinaryExpression(
+            left=Identifier("id"),
+            operator="=",
+            right=Literal(1),
+        ),
+        operator="OR",
+        right=LogicalExpression(
+            left=BinaryExpression(
+                left=Identifier("id"),
+                operator="=",
+                right=Literal(2),
+            ),
+            operator="AND",
+            right=BinaryExpression(
+                left=Identifier("cgpa"),
+                operator=">",
+                right=Literal(8.0),
+            ),
+        ),
+    )
+
+
+def test_update_with_and_condition():
+    statement = parse(
+        """
+        UPDATE students
+        SET cgpa = 9.5
+        WHERE department = 'CSE' AND id = 1;
+        """
+    )
+
+    assert isinstance(statement.where, LogicalExpression)
+    assert statement.where.operator == "AND"
+
+
+def test_delete_with_or_condition():
+    statement = parse(
+        """
+        DELETE FROM students
+        WHERE id = 1 OR id = 2;
+        """
+    )
+
+    assert isinstance(statement.where, LogicalExpression)
+    assert statement.where.operator == "OR"
