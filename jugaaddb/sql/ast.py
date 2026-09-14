@@ -71,3 +71,4 @@ class ColumnDefinition:
     data_type: Identifier
     primary_key: bool = False
     unique: bool = False
+    nullable: bool = True

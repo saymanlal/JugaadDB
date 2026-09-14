@@ -24,28 +24,31 @@ class Parser:
         TokenType.GREATER_EQUAL: ">=",
     }
 
-    LOGICAL_OPERATORS = {
-        TokenType.AND: "AND",
-        TokenType.OR: "OR",
-    }
-
     def __init__(self, tokens: list[Token]):
         if not isinstance(tokens, list):
-            raise TypeError("Tokens must be provided as a list.")
+            raise TypeError(
+                "Tokens must be provided as a list."
+            )
+
         self.tokens = tokens
         self.position = 0
 
     def parse(self):
         if self.current.type == TokenType.SELECT:
             statement = self._parse_select()
+
         elif self.current.type == TokenType.INSERT:
             statement = self._parse_insert()
+
         elif self.current.type == TokenType.UPDATE:
             statement = self._parse_update()
+
         elif self.current.type == TokenType.DELETE:
             statement = self._parse_delete()
+
         elif self.current.type == TokenType.CREATE:
             statement = self._parse_create_table()
+
         else:
             raise SyntaxError(
                 f"Unsupported statement: "
@@ -56,6 +59,7 @@ class Parser:
             self.advance()
 
         self.expect(TokenType.EOF)
+
         return statement
 
     @property
@@ -64,8 +68,10 @@ class Parser:
 
     def advance(self) -> Token:
         token = self.current
+
         if self.position < len(self.tokens) - 1:
             self.position += 1
+
         return token
 
     def expect(self, token_type: TokenType) -> Token:
@@ -75,6 +81,7 @@ class Parser:
                 f"{self.current.type.name} "
                 f"at position {self.current.position}."
             )
+
         return self.advance()
 
     def _parse_select(self) -> SelectStatement:
@@ -105,11 +112,16 @@ class Parser:
             self.advance()
             return [Identifier("*")]
 
-        columns.append(self._parse_identifier())
+        columns.append(
+            self._parse_identifier()
+        )
 
         while self.current.type == TokenType.COMMA:
             self.advance()
-            columns.append(self._parse_identifier())
+
+            columns.append(
+                self._parse_identifier()
+            )
 
         return columns
 
@@ -118,7 +130,9 @@ class Parser:
 
         while self.current.type == TokenType.OR:
             self.advance()
+
             right = self._parse_comparison()
+
             expression = LogicalExpression(
                 left=expression,
                 operator="OR",
@@ -132,7 +146,9 @@ class Parser:
 
         while self.current.type == TokenType.AND:
             self.advance()
+
             right = self._parse_comparison_part()
+
             expression = LogicalExpression(
                 left=expression,
                 operator="AND",
@@ -153,7 +169,10 @@ class Parser:
                 f"at position {operator_token.position}."
             )
 
-        operator = self.COMPARISON_OPERATORS[operator_token.type]
+        operator = self.COMPARISON_OPERATORS[
+            operator_token.type
+        ]
+
         self.advance()
 
         right = self._parse_literal()
@@ -175,7 +194,9 @@ class Parser:
         columns = self._parse_identifier_list()
 
         self.expect(TokenType.RIGHT_PAREN)
+
         self.expect(TokenType.VALUES)
+
         self.expect(TokenType.LEFT_PAREN)
 
         values = self._parse_literal_list()
@@ -184,7 +205,8 @@ class Parser:
 
         if len(columns) != len(values):
             raise SyntaxError(
-                "Number of columns must match number of values."
+                "Number of columns must match "
+                "number of values."
             )
 
         return InsertStatement(
@@ -262,19 +284,37 @@ class Parser:
 
         while True:
             name = self._parse_identifier()
+
             data_type = self._parse_identifier()
 
             primary_key = False
             unique = False
+            nullable = True
 
             if self.current.type == TokenType.PRIMARY:
                 self.advance()
+
                 self.expect(TokenType.KEY)
+
                 primary_key = True
+                nullable = False
 
             if self.current.type == TokenType.UNIQUE:
                 self.advance()
+
                 unique = True
+
+            if self.current.type == TokenType.NOT:
+                self.advance()
+
+                self.expect(TokenType.NULL)
+
+                nullable = False
+
+            elif self.current.type == TokenType.NULL:
+                self.advance()
+
+                nullable = True
 
             columns.append(
                 ColumnDefinition(
@@ -282,6 +322,7 @@ class Parser:
                     data_type=data_type,
                     primary_key=primary_key,
                     unique=unique,
+                    nullable=nullable,
                 )
             )
 
@@ -298,25 +339,38 @@ class Parser:
         )
 
     def _parse_identifier_list(self) -> list[Identifier]:
-        identifiers = [self._parse_identifier()]
+        identifiers = [
+            self._parse_identifier()
+        ]
 
         while self.current.type == TokenType.COMMA:
             self.advance()
-            identifiers.append(self._parse_identifier())
+
+            identifiers.append(
+                self._parse_identifier()
+            )
 
         return identifiers
 
     def _parse_literal_list(self) -> list[Literal]:
-        values = [self._parse_literal()]
+        values = [
+            self._parse_literal()
+        ]
 
         while self.current.type == TokenType.COMMA:
             self.advance()
-            values.append(self._parse_literal())
+
+            values.append(
+                self._parse_literal()
+            )
 
         return values
 
     def _parse_identifier(self) -> Identifier:
-        token = self.expect(TokenType.IDENTIFIER)
+        token = self.expect(
+            TokenType.IDENTIFIER
+        )
+
         return Identifier(token.value)
 
     def _parse_literal(self) -> Literal:
@@ -324,21 +378,32 @@ class Parser:
 
         if token.type == TokenType.INTEGER:
             self.advance()
-            return Literal(int(token.value))
+
+            return Literal(
+                int(token.value)
+            )
 
         if token.type == TokenType.FLOAT:
             self.advance()
-            return Literal(float(token.value))
+
+            return Literal(
+                float(token.value)
+            )
 
         if token.type == TokenType.STRING:
             self.advance()
-            return Literal(token.value)
+
+            return Literal(
+                token.value
+            )
 
         if token.type == TokenType.NULL:
             self.advance()
+
             return Literal(None)
 
         raise SyntaxError(
-            f"Expected literal, got {token.type.name} "
+            f"Expected literal, got "
+            f"{token.type.name} "
             f"at position {token.position}."
         )

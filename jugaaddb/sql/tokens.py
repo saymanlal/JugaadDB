@@ -22,6 +22,7 @@ class TokenType(Enum):
     PRIMARY = auto()
     KEY = auto()
     UNIQUE = auto()
+    NOT = auto()
     NULL = auto()
 
     IDENTIFIER = auto()

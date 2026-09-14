@@ -22,6 +22,7 @@ class Lexer:
         "PRIMARY": TokenType.PRIMARY,
         "KEY": TokenType.KEY,
         "UNIQUE": TokenType.UNIQUE,
+        "NOT": TokenType.NOT,
         "NULL": TokenType.NULL,
     }
 
@@ -41,76 +42,92 @@ class Lexer:
 
     def __init__(self, sql: str):
         if not isinstance(sql, str):
-            raise TypeError("SQL query must be a string.")
+            raise TypeError("SQL must be a string.")
+
         self.sql = sql
         self.position = 0
-        self.length = len(sql)
 
     def tokenize(self) -> list[Token]:
         tokens = []
 
-        while self.position < self.length:
+        while self.position < len(self.sql):
             char = self.sql[self.position]
 
             if char.isspace():
                 self.position += 1
                 continue
 
-            if char in ("'", '"'):
-                tokens.append(self._read_string())
+            if char.isalpha() or char == "_":
+                tokens.append(
+                    self._read_identifier_or_keyword()
+                )
                 continue
 
             if char.isdigit():
-                tokens.append(self._read_number())
-                continue
-
-            if char.isalpha() or char == "_":
-                tokens.append(self._read_identifier())
-                continue
-
-            if char in ("!", "<", ">"):
-                tokens.append(self._read_comparison_operator())
-                continue
-
-            if char in self.SINGLE_CHAR_TOKENS:
                 tokens.append(
-                    Token(
-                        self.SINGLE_CHAR_TOKENS[char],
-                        char,
-                        self.position,
-                    )
+                    self._read_number()
                 )
-                self.position += 1
+                continue
+
+            if char in ("'", '"'):
+                tokens.append(
+                    self._read_string(char)
+                )
+                continue
+
+            token = self._read_operator_or_symbol()
+
+            if token is not None:
+                tokens.append(token)
                 continue
 
             raise SyntaxError(
-                f"Unexpected character '{char}' at position {self.position}."
+                f"Unexpected character '{char}' "
+                f"at position {self.position}."
             )
 
-        tokens.append(Token(TokenType.EOF, "", self.position))
+        tokens.append(
+            Token(
+                TokenType.EOF,
+                "",
+                self.position,
+            )
+        )
+
         return tokens
 
-    def _read_identifier(self) -> Token:
+    def _read_identifier_or_keyword(self) -> Token:
         start = self.position
 
-        while self.position < self.length:
+        while self.position < len(self.sql):
             char = self.sql[self.position]
 
-            if char.isalnum() or char == "_":
-                self.position += 1
-            else:
+            if not (
+                char.isalnum()
+                or char == "_"
+            ):
                 break
 
-        value = self.sql[start:self.position]
-        token_type = self.KEYWORDS.get(value.upper(), TokenType.IDENTIFIER)
+            self.position += 1
 
-        return Token(token_type, value, start)
+        value = self.sql[start:self.position]
+
+        token_type = self.KEYWORDS.get(
+            value.upper(),
+            TokenType.IDENTIFIER,
+        )
+
+        return Token(
+            token_type,
+            value,
+            start,
+        )
 
     def _read_number(self) -> Token:
         start = self.position
-        decimal_count = 0
+        has_decimal = False
 
-        while self.position < self.length:
+        while self.position < len(self.sql):
             char = self.sql[self.position]
 
             if char.isdigit():
@@ -118,105 +135,146 @@ class Lexer:
                 continue
 
             if char == ".":
-                decimal_count += 1
-                if decimal_count > 1:
+                if has_decimal:
                     raise SyntaxError(
                         f"Invalid number at position {start}."
                     )
+
+                has_decimal = True
                 self.position += 1
+
+                if (
+                    self.position >= len(self.sql)
+                    or not self.sql[self.position].isdigit()
+                ):
+                    raise SyntaxError(
+                        f"Invalid number at position {start}."
+                    )
+
                 continue
 
             break
 
         value = self.sql[start:self.position]
 
-        if value.endswith("."):
-            raise SyntaxError(
-                f"Invalid number at position {start}."
-            )
-
-        token_type = (
-            TokenType.FLOAT
-            if decimal_count == 1
-            else TokenType.INTEGER
+        return Token(
+            TokenType.FLOAT if has_decimal else TokenType.INTEGER,
+            value,
+            start,
         )
 
-        return Token(token_type, value, start)
-
-    def _read_string(self) -> Token:
-        quote = self.sql[self.position]
+    def _read_string(self, quote: str) -> Token:
         start = self.position
         self.position += 1
+
         characters = []
 
-        while self.position < self.length:
+        escape_sequences = {
+            "n": "\n",
+            "t": "\t",
+            "r": "\r",
+            "\\": "\\",
+            "'": "'",
+            '"': '"',
+        }
+
+        while self.position < len(self.sql):
             char = self.sql[self.position]
-
-            if char == "\\":
-                if self.position + 1 >= self.length:
-                    raise SyntaxError(
-                        f"Unterminated string at position {start}."
-                    )
-
-                next_char = self.sql[self.position + 1]
-
-                if next_char == "n":
-                    characters.append("\n")
-                elif next_char == "t":
-                    characters.append("\t")
-                else:
-                    characters.append(next_char)
-
-                self.position += 2
-                continue
 
             if char == quote:
                 self.position += 1
+
                 return Token(
                     TokenType.STRING,
                     "".join(characters),
                     start,
                 )
 
+            if char == "\\":
+                self.position += 1
+
+                if self.position >= len(self.sql):
+                    raise SyntaxError(
+                        f"Unterminated string starting "
+                        f"at position {start}."
+                    )
+
+                escaped = self.sql[self.position]
+
+                if escaped not in escape_sequences:
+                    raise SyntaxError(
+                        f"Unsupported escape sequence "
+                        f"\\{escaped} at position "
+                        f"{self.position - 1}."
+                    )
+
+                characters.append(
+                    escape_sequences[escaped]
+                )
+
+                self.position += 1
+                continue
+
             characters.append(char)
             self.position += 1
 
         raise SyntaxError(
-            f"Unterminated string at position {start}."
+            f"Unterminated string starting "
+            f"at position {start}."
         )
 
-    def _read_comparison_operator(self) -> Token:
+    def _read_operator_or_symbol(self):
         start = self.position
-        char = self.sql[self.position]
 
-        if char == "!":
-            if self.position + 1 < self.length:
-                if self.sql[self.position + 1] == "=":
-                    self.position += 2
-                    return Token(TokenType.NOT_EQUAL, "!=", start)
+        if self.sql.startswith(
+            "!=",
+            self.position
+        ):
+            self.position += 2
 
-            raise SyntaxError(
-                f"Unexpected character '!' at position {start}."
+            return Token(
+                TokenType.NOT_EQUAL,
+                "!=",
+                start,
             )
 
-        if char == "<":
-            if self.position + 1 < self.length:
-                if self.sql[self.position + 1] == "=":
-                    self.position += 2
-                    return Token(TokenType.LESS_EQUAL, "<=", start)
+        if self.sql.startswith(
+            "<=",
+            self.position
+        ):
+            self.position += 2
 
-            self.position += 1
-            return Token(TokenType.LESS_THAN, "<", start)
+            return Token(
+                TokenType.LESS_EQUAL,
+                "<=",
+                start,
+            )
 
-        if char == ">":
-            if self.position + 1 < self.length:
-                if self.sql[self.position + 1] == "=":
-                    self.position += 2
-                    return Token(TokenType.GREATER_EQUAL, ">=", start)
+        if self.sql.startswith(
+            ">=",
+            self.position
+        ):
+            self.position += 2
 
-            self.position += 1
-            return Token(TokenType.GREATER_THAN, ">", start)
+            return Token(
+                TokenType.GREATER_EQUAL,
+                ">=",
+                start,
+            )
 
-        raise SyntaxError(
-            f"Invalid comparison operator at position {start}."
+        char = self.sql[self.position]
+
+        token_type = self.SINGLE_CHAR_TOKENS.get(
+            char
+        )
+
+        if token_type is None:
+            return None
+
+        self.position += 1
+
+        return Token(
+            token_type,
+            char,
+            start,
         )

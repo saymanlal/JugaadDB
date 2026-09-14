@@ -11,7 +11,7 @@ class Database:
         self,
         path: str,
         storage: StorageEngine,
-        data: dict[str, Any]
+        data: dict[str, Any],
     ):
         self.path = Path(path)
         self.storage = storage
@@ -21,24 +21,20 @@ class Database:
     def create(cls, path: str) -> "Database":
         storage = StorageEngine(path)
         storage.create()
-
         data = storage.load()
-
         return cls(path, storage, data)
 
     @classmethod
     def open(cls, path: str) -> "Database":
         storage = StorageEngine(path)
         data = storage.load()
-
         return cls(path, storage, data)
 
     def create_table(
         self,
         name: str,
-        columns: list[Column]
+        columns: list[Column],
     ) -> Table:
-
         tables = self.data["catalog"]["tables"]
 
         if name in tables:
@@ -59,17 +55,17 @@ class Database:
                 }
                 for column in schema.columns
             ],
-            "rows": []
+            "rows": [],
         }
 
         self._save()
 
         return Table(
-           name,
-           schema,
-           tables[name],
-           self._save
-         )
+            name,
+            schema,
+            tables[name],
+            self._save,
+        )
 
     def table(self, name: str) -> Table:
         tables = self.data["catalog"]["tables"]
@@ -81,23 +77,47 @@ class Database:
 
         table_data = tables[name]
 
-        schema = Schema([
-            Column(
-                name=column["name"],
-                data_type=column["data_type"],
-                primary_key=column["primary_key"],
-                nullable=column["nullable"],
-                unique=column["unique"],
-            )
-            for column in table_data["schema"]
-        ])
+        schema = Schema(
+            [
+                Column(
+                    name=column["name"],
+                    data_type=column["data_type"],
+                    primary_key=column["primary_key"],
+                    nullable=column["nullable"],
+                    unique=column["unique"],
+                )
+                for column in table_data["schema"]
+            ]
+        )
 
         return Table(
-           name,
-           schema,
-           tables[name],
-           self._save
-         )
+            name,
+            schema,
+            table_data,
+            self._save,
+        )
+
+    def execute(self, sql: str):
+        from ..sql.executor import Executor
+        from ..sql.lexer import Lexer
+        from ..sql.parser import Parser
+        from ..sql.planner import Planner
+
+        if not isinstance(sql, str):
+            raise TypeError(
+                "SQL query must be a string."
+            )
+
+        if not sql.strip():
+            raise ValueError(
+                "SQL query cannot be empty."
+            )
+
+        tokens = Lexer(sql).tokenize()
+        statement = Parser(tokens).parse()
+        plan = Planner().plan(statement)
+
+        return Executor(self).execute(plan)
 
     def _save(self) -> None:
         self.storage.save(self.data)
