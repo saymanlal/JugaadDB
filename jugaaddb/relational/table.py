@@ -1,6 +1,7 @@
 from typing import Any, Callable
 
 from ..core.schema import Schema
+from ..storage.physical_table import PhysicalTable
 
 
 class Table:
@@ -11,17 +12,31 @@ class Table:
         storage: dict[str, Any],
         save_callback: Callable[[], None] | None = None,
         index_manager=None,
+        physical_table: PhysicalTable | None = None,
     ):
         self.name = name
         self.schema = schema
         self.storage = storage
         self._save_callback = save_callback
         self.index_manager = index_manager
+        self.physical_table = physical_table
 
-        self.storage.setdefault("rows", [])
-        self.storage.setdefault("record_ids", [])
+        self.storage.setdefault(
+            "rows",
+            [],
+        )
+
+        self.storage.setdefault(
+            "record_ids",
+            [],
+        )
 
         self._initialize_record_ids()
+        self._migrate_legacy_rows_to_physical()
+
+    @property
+    def data(self) -> dict[str, Any]:
+        return self.storage
 
     @property
     def rows(self) -> list[dict[str, Any]]:
@@ -31,34 +46,71 @@ class Table:
     def record_ids(self) -> list[tuple[int, int]]:
         return self.storage["record_ids"]
 
-    def insert(self, row: dict[str, Any]) -> None:
+    def insert(
+        self,
+        row: dict[str, Any],
+    ) -> None:
+        if self.physical_table is not None:
+            self._synchronize_from_physical()
+
         self.schema.validate_row(row)
         self._check_primary_key(row)
         self._check_unique_columns(row)
 
         normalized = {
-            column.name: row.get(column.name)
+            column.name: row.get(
+                column.name
+            )
             for column in self.schema.columns
         }
 
-        record_id = self._next_record_id()
+        if self.physical_table is not None:
+            record_id = self.physical_table.insert(
+                normalized
+            )
+        else:
+            record_id = self._next_record_id()
 
         self.rows.append(normalized)
         self.record_ids.append(record_id)
 
         try:
-            self._index_insert(normalized, record_id)
+            self._index_insert(
+                normalized,
+                record_id,
+            )
+
             self._save()
+
         except Exception:
             self.rows.pop()
             self.record_ids.pop()
+
+            if self.physical_table is not None:
+                try:
+                    self.physical_table.delete(
+                        record_id
+                    )
+                except Exception:
+                    pass
+
             self._index_delete(
                 normalized,
                 record_id,
             )
+
             raise
 
-    def select_all(self) -> list[dict[str, Any]]:
+    def select_all(
+        self,
+    ) -> list[dict[str, Any]]:
+        if self.physical_table is not None:
+            return [
+                row.copy()
+                for _, row
+                in self.physical_table.scan()
+            ]
+
         return [
             row.copy()
             for row in self.rows
@@ -66,7 +118,22 @@ class Table:
 
     def select_all_with_ids(
         self,
-    ) -> list[tuple[tuple[int, int], dict[str, Any]]]:
+    ) -> list[
+        tuple[
+            tuple[int, int],
+            dict[str, Any],
+        ]
+    ]:
+        if self.physical_table is not None:
+            return [
+                (
+                    record_id,
+                    row.copy(),
+                )
+                for record_id, row
+                in self.physical_table.scan()
+            ]
+
         return [
             (
                 record_id,
@@ -82,9 +149,15 @@ class Table:
         self,
         record_id: tuple[int, int],
     ) -> dict[str, Any]:
+        if self.physical_table is not None:
+            return self.physical_table.read(
+                record_id
+            )
+
         if record_id not in self.record_ids:
             raise ValueError(
-                f"Record does not exist: {record_id}"
+                f"Record does not exist: "
+                f"{record_id}"
             )
 
         index = self.record_ids.index(
@@ -98,6 +171,9 @@ class Table:
         condition: dict[str, Any],
         changes: dict[str, Any],
     ) -> int:
+        if self.physical_table is not None:
+            self._synchronize_from_physical()
+
         if not changes:
             return 0
 
@@ -107,10 +183,12 @@ class Table:
         matched = [
             (
                 index,
-                self.rows[index],
+                self.rows[index].copy(),
                 self.record_ids[index],
             )
-            for index in range(len(self.rows))
+            for index in range(
+                len(self.rows)
+            )
             if self._matches(
                 self.rows[index],
                 condition,
@@ -122,11 +200,17 @@ class Table:
 
         updated_rows = []
 
-        for index, row, record_id in matched:
+        for (
+            index,
+            row,
+            record_id,
+        ) in matched:
             updated = row.copy()
             updated.update(changes)
 
-            self.schema.validate_row(updated)
+            self.schema.validate_row(
+                updated
+            )
 
             updated_rows.append(
                 (
@@ -142,7 +226,12 @@ class Table:
             for row in self.rows
         ]
 
-        for index, _, updated, _ in updated_rows:
+        for (
+            index,
+            _,
+            updated,
+            _,
+        ) in updated_rows:
             candidate_rows[index] = updated
 
         self._validate_primary_key_rows(
@@ -155,22 +244,23 @@ class Table:
 
         changed_indexes = []
 
-        for index, old_row, new_row, record_id in updated_rows:
-            indexes = self._changed_indexes(
+        for (
+            _,
+            old_row,
+            new_row,
+            record_id,
+        ) in updated_rows:
+            for db_index in self._changed_indexes(
                 old_row,
                 new_row,
-            )
-
-            for db_index in indexes:
+            ):
                 old_value = old_row.get(
                     db_index.column
                 )
+
                 new_value = new_row.get(
                     db_index.column
                 )
-
-                if old_value == new_value:
-                    continue
 
                 changed_indexes.append(
                     (
@@ -181,7 +271,8 @@ class Table:
                     )
                 )
 
-        completed_deletes = []
+        index_changes_applied = []
+        physical_changes_applied = []
 
         try:
             for (
@@ -196,32 +287,74 @@ class Table:
                         record_id,
                     )
 
-                completed_deletes.append(
-                    (
-                        db_index,
-                        old_value,
-                        record_id,
-                    )
-                )
-
                 if new_value is not None:
                     db_index.insert(
                         new_value,
                         record_id,
                     )
 
-            for index, _, updated, _ in updated_rows:
+                index_changes_applied.append(
+                    (
+                        db_index,
+                        old_value,
+                        new_value,
+                        record_id,
+                    )
+                )
+
+            if self.physical_table is not None:
+                for (
+                    _,
+                    old_row,
+                    updated,
+                    record_id,
+                ) in updated_rows:
+                    self.physical_table.update(
+                        record_id,
+                        updated,
+                    )
+
+                    physical_changes_applied.append(
+                        (
+                            record_id,
+                            old_row,
+                        )
+                    )
+
+            for (
+                index,
+                _,
+                updated,
+                _,
+            ) in updated_rows:
                 self.rows[index] = updated
 
             self._save()
 
         except Exception:
+            if self.physical_table is not None:
+                for (
+                    record_id,
+                    old_row,
+                ) in reversed(
+                    physical_changes_applied
+                ):
+                    try:
+                        self.physical_table.update(
+                            record_id,
+                            old_row,
+                        )
+                    except Exception:
+                        pass
+
             for (
                 db_index,
                 old_value,
                 new_value,
                 record_id,
-            ) in reversed(changed_indexes):
+            ) in reversed(
+                index_changes_applied
+            ):
                 try:
                     if new_value is not None:
                         db_index.delete(
@@ -240,14 +373,6 @@ class Table:
                 except Exception:
                     pass
 
-            for (
-                index,
-                old_row,
-                _,
-                _,
-            ) in updated_rows:
-                self.rows[index] = old_row
-
             raise
 
         return len(updated_rows)
@@ -256,6 +381,9 @@ class Table:
         self,
         condition: dict[str, Any],
     ) -> int:
+        if self.physical_table is not None:
+            self._synchronize_from_physical()
+
         self._validate_columns(condition)
 
         matched = [
@@ -264,7 +392,9 @@ class Table:
                 self.rows[index].copy(),
                 self.record_ids[index],
             )
-            for index in range(len(self.rows))
+            for index in range(
+                len(self.rows)
+            )
             if self._matches(
                 self.rows[index],
                 condition,
@@ -277,7 +407,11 @@ class Table:
         deleted_index_entries = []
 
         try:
-            for _, row, record_id in matched:
+            for (
+                _,
+                row,
+                record_id,
+            ) in matched:
                 for db_index in self._indexes():
                     value = row.get(
                         db_index.column
@@ -299,25 +433,38 @@ class Table:
                         )
                     )
 
+            if self.physical_table is not None:
+                for (
+                    _,
+                    _,
+                    record_id,
+                ) in matched:
+                    self.physical_table.delete(
+                        record_id
+                    )
+
             matched_positions = {
                 index
-                for index, _, _ in matched
+                for index, _, _
+                in matched
             }
 
             self.rows[:] = [
                 row
-                for index, row in enumerate(
-                    self.rows
-                )
-                if index not in matched_positions
+                for index, row
+                in enumerate(self.rows)
+                if index
+                not in matched_positions
             ]
 
             self.record_ids[:] = [
                 record_id
-                for index, record_id in enumerate(
+                for index, record_id
+                in enumerate(
                     self.record_ids
                 )
-                if index not in matched_positions
+                if index
+                not in matched_positions
             ]
 
             self._save()
@@ -342,13 +489,89 @@ class Table:
 
         return len(matched)
 
-    def _initialize_record_ids(self) -> None:
+    def _migrate_legacy_rows_to_physical(
+        self,
+    ) -> None:
+        if self.physical_table is None:
+            return
+
+        legacy_rows = [
+            row.copy()
+            for row in self.rows
+        ]
+
+        physical_records = (
+            self.physical_table.scan()
+        )
+
+        if physical_records:
+            self._synchronize_from_physical()
+            return
+
+        if not legacy_rows:
+            return
+
+        migrated_record_ids = []
+
+        try:
+            for row in legacy_rows:
+                record_id = self.physical_table.insert(
+                    row
+                )
+
+                migrated_record_ids.append(
+                    record_id
+                )
+
+        except Exception:
+            for record_id in reversed(
+                migrated_record_ids
+            ):
+                try:
+                    self.physical_table.delete(
+                        record_id
+                    )
+                except Exception:
+                    pass
+
+            raise
+
+        self.record_ids[:] = migrated_record_ids
+        self._synchronize_from_physical()
+        self._save()
+
+    def _synchronize_from_physical(
+        self,
+    ) -> None:
+        if self.physical_table is None:
+            return
+
+        physical_records = (
+            self.physical_table.scan()
+        )
+
+        self.record_ids[:] = [
+            record_id
+            for record_id, _
+            in physical_records
+        ]
+
+        self.rows[:] = [
+            row.copy()
+            for _, row
+            in physical_records
+        ]
+
+    def _initialize_record_ids(
+        self,
+    ) -> None:
         rows = self.rows
         record_ids = self.record_ids
 
         if len(record_ids) > len(rows):
             raise ValueError(
-                "Stored record ID count exceeds row count."
+                "Stored record ID count "
+                "exceeds row count."
             )
 
         if len(record_ids) == len(rows):
@@ -356,11 +579,14 @@ class Table:
             return
 
         if record_ids:
-            next_slot = max(
-                slot_id
-                for page_id, slot_id
-                in record_ids
-            ) + 1
+            next_slot = (
+                max(
+                    slot_id
+                    for _, slot_id
+                    in record_ids
+                )
+                + 1
+            )
         else:
             next_slot = 0
 
@@ -381,15 +607,23 @@ class Table:
         if not self.record_ids:
             return (1, 0)
 
-        next_slot = max(
-            slot_id
-            for page_id, slot_id
-            in self.record_ids
-        ) + 1
+        next_slot = (
+            max(
+                slot_id
+                for _, slot_id
+                in self.record_ids
+            )
+            + 1
+        )
 
-        return (1, next_slot)
+        return (
+            1,
+            next_slot,
+        )
 
-    def _validate_record_ids(self) -> None:
+    def _validate_record_ids(
+        self,
+    ) -> None:
         seen = set()
 
         for record_id in self.record_ids:
@@ -433,7 +667,8 @@ class Table:
 
             if normalized in seen:
                 raise ValueError(
-                    f"Duplicate record ID: {normalized}"
+                    f"Duplicate record ID: "
+                    f"{normalized}"
                 )
 
             seen.add(normalized)
@@ -501,7 +736,8 @@ class Table:
 
             if value in seen:
                 raise ValueError(
-                    f"Duplicate primary key: {value}"
+                    f"Duplicate primary key: "
+                    f"{value}"
                 )
 
             seen.add(value)
@@ -564,7 +800,8 @@ class Table:
                 == value
             ):
                 raise ValueError(
-                    f"Duplicate primary key: {value}"
+                    f"Duplicate primary key: "
+                    f"{value}"
                 )
 
     def _check_unique_columns(
@@ -651,9 +888,10 @@ class Table:
                 )
 
         except Exception:
-            for db_index, value in reversed(
-                inserted
-            ):
+            for (
+                db_index,
+                value,
+            ) in reversed(inserted):
                 try:
                     db_index.delete(
                         value,
