@@ -32,9 +32,8 @@ class SlottedPage:
     def from_bytes(
         cls,
         page_id: int,
-        data: bytes
+        data: bytes,
     ) -> "SlottedPage":
-
         if type(page_id) is not int:
             raise TypeError(
                 "Page ID must be an integer."
@@ -66,11 +65,11 @@ class SlottedPage:
 
         (
             page.slot_count,
-            page.free_space_start
+            page.free_space_start,
         ) = struct.unpack_from(
             cls.HEADER_FORMAT,
             page.data,
-            0
+            0,
         )
 
         if page.free_space_start < cls.HEADER_SIZE:
@@ -87,7 +86,10 @@ class SlottedPage:
 
         slot_directory_start = (
             PAGE_SIZE
-            - (page.slot_count * cls.SLOT_SIZE)
+            - (
+                page.slot_count
+                * cls.SLOT_SIZE
+            )
         )
 
         if slot_directory_start < page.free_space_start:
@@ -101,7 +103,10 @@ class SlottedPage:
     def to_bytes(self) -> bytes:
         return bytes(self.data)
 
-    def insert(self, record: bytes) -> int:
+    def insert(
+        self,
+        record: bytes,
+    ) -> int:
         if not isinstance(record, bytes):
             raise TypeError(
                 "Record must be bytes."
@@ -128,7 +133,10 @@ class SlottedPage:
 
         slot_offset = (
             PAGE_SIZE
-            - ((slot_id + 1) * self.SLOT_SIZE)
+            - (
+                (slot_id + 1)
+                * self.SLOT_SIZE
+            )
         )
 
         struct.pack_into(
@@ -136,7 +144,7 @@ class SlottedPage:
             self.data,
             slot_offset,
             record_offset,
-            len(record)
+            len(record),
         )
 
         self.slot_count += 1
@@ -146,7 +154,10 @@ class SlottedPage:
 
         return slot_id
 
-    def read(self, slot_id: int) -> bytes:
+    def read(
+        self,
+        slot_id: int,
+    ) -> bytes:
         self._validate_slot_id(slot_id)
 
         offset, length = self._read_slot(
@@ -163,7 +174,108 @@ class SlottedPage:
             ]
         )
 
-    def delete(self, slot_id: int) -> None:
+    def update(
+        self,
+        slot_id: int,
+        record: bytes,
+    ) -> None:
+        if not isinstance(record, bytes):
+            raise TypeError(
+                "Record must be bytes."
+            )
+
+        self._validate_slot_id(slot_id)
+
+        offset, old_length = self._read_slot(
+            slot_id
+        )
+
+        if old_length == 0:
+            raise ValueError(
+                f"Record has been deleted: "
+                f"slot {slot_id}"
+            )
+
+        new_length = len(record)
+
+        if new_length <= old_length:
+            self.data[
+                offset:
+                offset + new_length
+            ] = record
+
+            if new_length < old_length:
+                self.data[
+                    offset + new_length:
+                    offset + old_length
+                ] = b"\x00" * (
+                    old_length - new_length
+                )
+
+            slot_offset = (
+                PAGE_SIZE
+                - (
+                    (slot_id + 1)
+                    * self.SLOT_SIZE
+                )
+            )
+
+            struct.pack_into(
+                self.SLOT_FORMAT,
+                self.data,
+                slot_offset,
+                offset,
+                new_length,
+            )
+
+            return
+
+        self._compact()
+
+        offset, old_length = self._read_slot(
+            slot_id
+        )
+
+        if new_length > (
+            self.free_space()
+            + old_length
+        ):
+            raise ValueError(
+                "Not enough free space on page "
+                "for update."
+            )
+
+        new_offset = self.free_space_start
+
+        self.data[
+            new_offset:
+            new_offset + new_length
+        ] = record
+
+        slot_offset = (
+            PAGE_SIZE
+            - (
+                (slot_id + 1)
+                * self.SLOT_SIZE
+            )
+        )
+
+        struct.pack_into(
+            self.SLOT_FORMAT,
+            self.data,
+            slot_offset,
+            new_offset,
+            new_length,
+        )
+
+        self.free_space_start += new_length
+
+        self._write_header()
+
+    def delete(
+        self,
+        slot_id: int,
+    ) -> None:
         self._validate_slot_id(slot_id)
 
         if self.is_deleted(slot_id):
@@ -174,7 +286,10 @@ class SlottedPage:
 
         slot_offset = (
             PAGE_SIZE
-            - ((slot_id + 1) * self.SLOT_SIZE)
+            - (
+                (slot_id + 1)
+                * self.SLOT_SIZE
+            )
         )
 
         offset, _ = self._read_slot(
@@ -186,8 +301,68 @@ class SlottedPage:
             self.data,
             slot_offset,
             offset,
-            0
+            0,
         )
+    
+    def restore(
+        self,
+        slot_id: int,
+        record: bytes,
+    ) -> None:
+        if not isinstance(record, bytes):
+            raise TypeError(
+                "Record must be bytes."
+            )
+
+        self._validate_slot_id(slot_id)
+
+        offset, old_length = self._read_slot(
+            slot_id
+        )
+
+        if old_length != 0:
+            raise ValueError(
+                f"Record is not deleted: slot {slot_id}"
+            )
+
+        required_space = (
+            len(record)
+        )
+
+        if required_space > self.free_space():
+            self._compact()
+
+        if len(record) > self.free_space():
+            raise ValueError(
+                "Not enough free space on page for restore."
+            )
+
+        new_offset = self.free_space_start
+
+        self.data[
+            new_offset:
+            new_offset + len(record)
+        ] = record
+
+        slot_offset = (
+            PAGE_SIZE
+            - (
+                (slot_id + 1)
+                * self.SLOT_SIZE
+            )
+        )
+
+        struct.pack_into(
+            self.SLOT_FORMAT,
+            self.data,
+            slot_offset,
+            new_offset,
+            len(record),
+        )
+
+        self.free_space_start += len(record)
+
+        self._write_header()
 
     def slot_count_total(self) -> int:
         return self.slot_count
@@ -195,16 +370,22 @@ class SlottedPage:
     def free_space(self) -> int:
         slot_directory_start = (
             PAGE_SIZE
-            - (self.slot_count * self.SLOT_SIZE)
+            - (
+                self.slot_count
+                * self.SLOT_SIZE
+            )
         )
 
         return max(
             0,
             slot_directory_start
-            - self.free_space_start
+            - self.free_space_start,
         )
 
-    def is_deleted(self, slot_id: int) -> bool:
+    def is_deleted(
+        self,
+        slot_id: int,
+    ) -> bool:
         self._validate_slot_id(slot_id)
 
         _, length = self._read_slot(
@@ -213,20 +394,85 @@ class SlottedPage:
 
         return length == 0
 
+    def _compact(self) -> None:
+        records = []
+
+        for slot_id in range(
+            self.slot_count
+        ):
+            offset, length = self._read_slot(
+                slot_id
+            )
+
+            if length == 0:
+                records.append(None)
+            else:
+                records.append(
+                    bytes(
+                        self.data[
+                            offset:
+                            offset + length
+                        ]
+                    )
+                )
+
+        new_data = bytearray(PAGE_SIZE)
+        new_free_space_start = self.HEADER_SIZE
+
+        for slot_id, record in enumerate(
+            records
+        ):
+            if record is None:
+                continue
+
+            new_offset = new_free_space_start
+
+            new_data[
+                new_offset:
+                new_offset + len(record)
+            ] = record
+
+            slot_offset = (
+                PAGE_SIZE
+                - (
+                    (slot_id + 1)
+                    * self.SLOT_SIZE
+                )
+            )
+
+            struct.pack_into(
+                self.SLOT_FORMAT,
+                new_data,
+                slot_offset,
+                new_offset,
+                len(record),
+            )
+
+            new_free_space_start += len(record)
+
+        self.data = new_data
+        self.free_space_start = (
+            new_free_space_start
+        )
+
+        self._write_header()
+
     def _read_slot(
         self,
-        slot_id: int
+        slot_id: int,
     ) -> tuple[int, int]:
-
         slot_offset = (
             PAGE_SIZE
-            - ((slot_id + 1) * self.SLOT_SIZE)
+            - (
+                (slot_id + 1)
+                * self.SLOT_SIZE
+            )
         )
 
         return struct.unpack_from(
             self.SLOT_FORMAT,
             self.data,
-            slot_offset
+            slot_offset,
         )
 
     def _write_header(self) -> None:
@@ -235,14 +481,13 @@ class SlottedPage:
             self.data,
             0,
             self.slot_count,
-            self.free_space_start
+            self.free_space_start,
         )
 
     def _validate_slot_id(
         self,
-        slot_id: int
+        slot_id: int,
     ) -> None:
-
         if type(slot_id) is not int:
             raise TypeError(
                 "Slot ID must be an integer."
