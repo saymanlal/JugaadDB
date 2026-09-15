@@ -2,199 +2,118 @@
 
 ## A Database Management System Built from Scratch in Python
 
-**JugaadDB** is a custom database management system implemented from scratch in Python. The project focuses on understanding and implementing the internal components of a database engine instead of depending on an existing relational database system.
+JugaadDB is a custom database management system built from scratch in Python. It is designed to demonstrate how a real database engine works internally, including SQL processing, physical storage, buffer management, indexing, persistence, and query optimization.
 
-JugaadDB is designed around a modular architecture containing a storage layer, relational layer, SQL processing engine, indexing subsystem, and query optimization components.
+The project does not use SQLite, PostgreSQL, MySQL, MongoDB, or any other database engine as its core storage system.
 
-> **One Engine. Multiple Data Models. Zero Required Infrastructure.**
-
----
+> One Engine. Multiple Data Models. Zero Required Infrastructure.
 
 ## Project Status
 
-**Current Phase:** Phase 3 — Indexing and Query Optimization
+Current milestone:
 
-**Test Status:** 424 passed
+**Phase 4 - Physical Storage Integration: COMPLETE**
 
-**Language:** Python 3.12+
+Test status:
 
-**Database File Format:** Custom `.jdb` format
+```text
+594 passed
+```
 
-**External Database Dependency:** None
+The complete existing test suite passes successfully.
 
-**Required Infrastructure:** None
-
----
-
-## Vision
-
-The long-term goal of JugaadDB is to build a lightweight database engine that demonstrates how modern database systems work internally.
-
-The project is intentionally implemented from the ground up rather than wrapping an existing database such as:
-
-* SQLite
-* MySQL
-* PostgreSQL
-* MongoDB
-
-JugaadDB aims to provide its own implementations for important database concepts including:
-
-* Database files
-* Pages
-* Records
-* Schemas
-* Tables
-* SQL parsing
-* Query planning
-* Query execution
-* Indexes
-* B+Tree structures
-* Index persistence
-* Query optimization
-* Transactions
-* Write-ahead logging
-* Recovery
-* NoSQL-style document storage
-* Key-value storage
-* Authentication
-* Authorization
-* Audit logging
-
----
-
-# Architecture
-
-The current and planned architecture is:
+## Core Architecture
 
 ```text
                          JUGAADDB
                             |
         +-------------------+-------------------+
         |                   |                   |
-    SQL ENGINE        DATABASE CORE       INDEXING ENGINE
+    SQL ENGINE          DATABASE CORE       INDEXING
         |                   |                   |
-    Lexer              Database             Index
-    Parser             Schema               Manager
-    AST                Table                B+Tree
-    Planner            Relations            Index Scan
+    Lexer                Catalog            B+Tree
+    Parser               Schema             Memory Index
+    AST                  Tables             Persistence
+    Planner
     Executor
         |
-        +-------------------+
-                            |
-                     QUERY OPTIMIZER
-                            |
-              +-------------+-------------+
-              |                           |
-          Table Scan                  Index Scan
-                                          |
-                                      B+Tree
-                                          |
-                                   Stable Record IDs
-                                          |
-                                  Physical Storage
-                                          |
-                                    Record Manager
-                                          |
-                                     Slotted Pages
-                                          |
-                                     File Manager
-                                          |
-                                       .jdb File
+        v
+      TABLE
+        |
+        v
+  PHYSICAL TABLE
+        |
+        v
+   BUFFER POOL
+        |
+        v
+ RECORD MANAGER
+        |
+        v
+  SLOTTED PAGE
+        |
+        v
+  FILE MANAGER
+        |
+        v
+ PHYSICAL STORAGE
 ```
 
----
+## Major Components
 
-# Repository Structure
+### SQL Engine
+
+JugaadDB contains its own SQL processing pipeline:
 
 ```text
-JugaadDB/
-├── benchmarks/
-│   └── index_performance.py
-│
-├── docs/
-│
-├── examples/
-│
-├── jugaaddb/
-│   ├── core/
-│   │   ├── database.py
-│   │   └── schema.py
-│   │
-│   ├── relational/
-│   │   └── table.py
-│   │
-│   ├── storage/
-│   │   ├── constants.py
-│   │   ├── file_manager.py
-│   │   ├── page.py
-│   │   ├── record_codec.py
-│   │   ├── record_manager.py
-│   │   ├── record_serializer.py
-│   │   ├── slotted_page.py
-│   │   └── storage_engine.py
-│   │
-│   ├── sql/
-│   │   ├── ast.py
-│   │   ├── errors.py
-│   │   ├── executor.py
-│   │   ├── lexer.py
-│   │   ├── parser.py
-│   │   ├── plan.py
-│   │   ├── planner.py
-│   │   ├── result.py
-│   │   └── tokens.py
-│   │
-│   └── indexing/
-│       ├── base.py
-│       ├── btree.py
-│       ├── index_file.py
-│       ├── manager.py
-│       ├── memory.py
-│       ├── metadata.py
-│       ├── persistence.py
-│       ├── scan.py
-│       ├── serializer.py
-│       └── tree_serializer.py
-│
-├── tests/
-│   ├── core/
-│   ├── relational/
-│   ├── storage/
-│   ├── sql/
-│   └── indexing/
-│
-├── .gitignore
-├── LICENSE
-├── README.md
-├── pyproject.toml
-└── requirements.txt
+SQL Query
+   ↓
+Lexer
+   ↓
+Parser
+   ↓
+AST
+   ↓
+Planner
+   ↓
+Optimizer
+   ↓
+Executor
+   ↓
+Result
 ```
 
----
+Supported functionality includes:
 
-# Implemented Features
+* CREATE TABLE
+* INSERT
+* SELECT
+* UPDATE
+* DELETE
+* WHERE conditions
+* AND / OR conditions
+* comparison operators
+* projections
+* filtering
+* CREATE INDEX
+* indexed queries
 
-## Phase 1 — Persistence Foundation
+## Database Core
 
-JugaadDB started with a custom database abstraction capable of creating and opening database files.
+The database core manages:
 
-Implemented:
+* databases
+* tables
+* schemas
+* columns
+* data types
+* primary keys
+* nullable constraints
+* unique constraints
+* catalog metadata
+* table lifecycle
 
-* Database creation
-* Database reopening
-* Table creation
-* Schema definition
-* Column types
-* Primary keys
-* Nullable constraints
-* Unique constraints
-* Insert
-* Select
-* Update
-* Delete
-* Persistence validation
-
-Supported types include:
+Current supported primitive types:
 
 ```text
 INTEGER
@@ -203,992 +122,509 @@ TEXT
 BOOLEAN
 ```
 
----
+## Physical Storage Engine
 
-# Phase 1.5 — Physical Record Foundation
+JugaadDB implements physical record storage instead of delegating storage to another database.
 
-The project introduced the initial physical storage primitives.
-
-Implemented:
-
-* Fixed-size database pages
-* Database file headers
-* Page allocation
-* Binary page storage
-* Binary record serialization
-* Schema-aware record encoding
-* Schema-aware record decoding
-* Slotted pages
-* Slot directories
-* Record deletion
-* Record manager
-* Physical Record IDs
-
-The slotted-page model follows the basic concept:
+The storage architecture contains:
 
 ```text
-+----------------------------------+
-| Page Header                      |
-+----------------------------------+
-|                                  |
-| Record Area                      |
-|                                  |
-|                                  |
-+----------------------------------+
-| Slot Directory                   |
-+----------------------------------+
+FileManager
+    ↓
+Page
+    ↓
+SlottedPage
+    ↓
+RecordManager
+    ↓
+PhysicalTable
 ```
 
-This establishes the foundation required for a future full physical-storage integration.
+### Pages
 
----
-
-# Phase 2 — SQL Engine
-
-JugaadDB gained a custom SQL processing pipeline.
+The storage engine uses fixed-size pages.
 
 ```text
-SQL
- |
-Lexer
- |
-Tokens
- |
-Parser
- |
-AST
- |
-Planner
- |
-Logical Plan
- |
-Executor
- |
-Result
+PAGE_SIZE = 4096 bytes
 ```
 
-Implemented components:
+The database file contains a header page followed by physical data pages.
 
-### Lexer
+### Slotted Pages
 
-Converts SQL text into tokens.
+Records are stored using a slotted-page structure.
 
-### Parser
+A page maintains:
 
-Converts tokens into an Abstract Syntax Tree.
+* page metadata
+* slot directory
+* record offsets
+* record lengths
+* deleted-slot information
+* free-space tracking
 
-### AST
+This allows records to be addressed using stable physical identifiers.
 
-Represents SQL statements using structured Python objects.
+## Record IDs
 
-### Planner
+Physical records use:
 
-Converts AST nodes into executable logical plans.
+```text
+(page_id, slot_id)
+```
 
-### Executor
+Example:
 
-Executes plans against the database.
+```text
+(3, 7)
+```
 
-Supported SQL capabilities include:
+This identifies a record physically inside the database storage layer.
 
-```sql
-CREATE TABLE
-CREATE INDEX
+Record IDs remain stable across database reopen operations.
+
+## Record Serialization
+
+JugaadDB contains custom binary record serialization.
+
+Supported field encoding:
+
+```text
+NULL
+INTEGER
+FLOAT
+TEXT
+BOOLEAN
+```
+
+The system converts logical rows into binary records and reconstructs rows from the physical representation.
+
+## Buffer Pool
+
+JugaadDB implements an in-memory buffer pool between the database engine and physical storage.
+
+```text
+Query
+  ↓
+RecordManager
+  ↓
+BufferPool
+  ↓
+FileManager
+  ↓
+Disk
+```
+
+The buffer pool provides:
+
+* page caching
+* cache hits
+* cache misses
+* LRU-style page management
+* dirty page tracking
+* page flushing
+* partial dirty-page flushing
+* page eviction
+* pin/unpin support
+* capacity management
+* clean-page removal
+* write failure protection
+
+Example statistics:
+
+```text
+size
+hits
+misses
+hit_rate
+dirty_count
+dirty_page_ids
+pinned_page_ids
+```
+
+## Persistence
+
+JugaadDB persists:
+
+* database metadata
+* schemas
+* physical records
+* Record IDs
+* indexes
+* B+Tree structures
+
+The database can be closed and reopened while preserving its stored state.
+
+## Indexing
+
+JugaadDB supports custom indexes.
+
+Current index architecture:
+
+```text
+IndexManager
+     |
+     +---- MemoryIndex
+     |
+     +---- BPlusTreeIndex
+                  |
+             Persistence
+```
+
+## B+Tree
+
+JugaadDB implements a custom B+Tree index with:
+
+* configurable order
+* leaf nodes
+* internal nodes
+* duplicate keys
+* RecordID lists
+* node splitting
+* root splitting
+* leaf chaining
+* range scanning
+* deletion
+* borrowing
+* merging
+* root shrinking
+* structural validation
+
+The B+Tree is implemented without relying on a database library.
+
+## Persistent Indexes
+
+B+Tree indexes can be persisted using a custom binary persistence format.
+
+The persistence layer stores:
+
+```text
+Index Metadata
++
+B+Tree Structure
+```
+
+No Python pickle-based persistence is used.
+
+Persistent indexes are automatically restored when the database is reopened.
+
+## Index Maintenance
+
+Indexes remain synchronized with physical records during:
+
+```text
 INSERT
-SELECT
 UPDATE
 DELETE
-WHERE
-AND
-OR
-ORDER-related expression infrastructure
-NULL
-NOT NULL
-PRIMARY KEY
-UNIQUE
 ```
 
----
+The SQL engine can use available indexes when planning suitable queries.
 
-# Phase 3 — Indexing and Query Optimization
+## Query Optimization
 
-Phase 3 introduced the indexing subsystem and query optimization pipeline.
+JugaadDB includes basic query optimization.
 
-The main goal was to move JugaadDB beyond simple table scanning.
+The optimizer can:
 
----
+* detect equality predicates
+* detect indexable AND predicates
+* select suitable indexes
+* score candidate indexes deterministically
+* choose index scans where appropriate
+* perform full condition rechecks
 
-## Phase 3.1 — Index Foundation
+The optimizer intentionally avoids unsafe single-index assumptions for unsupported OR conditions.
 
-A generic index abstraction was introduced.
+## Performance
 
-The index interface supports:
+A benchmark over 1000 rows demonstrated the benefit of the custom B+Tree index.
 
 ```text
-insert()
-delete()
-search()
-scan()
+Table Scan:
+2.728 ms average
+
+B+Tree:
+0.596 ms average
 ```
 
-Implemented index types include:
-
-* Memory index
-* B+Tree index
-
-An `IndexManager` was introduced to manage indexes per table.
-
-Conceptually:
+Observed result:
 
 ```text
-Database
-   |
-IndexManager
-   |
-   +---- students
-          |
-          +---- id_index
-          +---- cgpa_index
+~4.58x faster
+~78.14% improvement
 ```
 
----
+The benchmark demonstrates that the indexing layer can significantly reduce lookup time compared with a complete table scan.
 
-# Phase 3.2 — B+Tree
+## Physical Storage Integration
 
-JugaadDB implemented a B+Tree-style index from scratch.
+Phase 4 connected the logical database layer with the physical storage engine.
 
-The implementation supports:
-
-* Leaf nodes
-* Internal nodes
-* Root nodes
-* Key insertion
-* Duplicate keys
-* Record ID lists
-* Leaf splitting
-* Internal splitting
-* Root splitting
-* Leaf chaining
-* Exact search
-* Range search
-* Structural validation
-
-The leaf level is connected using:
-
-```text
-Leaf 1 → Leaf 2 → Leaf 3 → Leaf 4
-```
-
-This enables efficient ordered scans and range operations.
-
----
-
-# B+Tree Deletion
-
-B+Tree deletion was implemented with:
-
-* Record removal
-* Key removal
-* Duplicate-value removal
-* Underflow handling
-* Borrowing from siblings
-* Merging nodes
-* Parent separator refresh
-* Root shrinking
-* Leaf-chain preservation
-* Empty-root handling
-
-The tree also contains validation logic capable of checking structural invariants.
-
----
-
-# Phase 3.3 — Persistent Index
-
-The B+Tree was extended with custom persistence support.
-
-Implemented components include:
-
-```text
-IndexMetadata
-IndexSerializer
-IndexFile
-BTreeSerializer
-BTreePersistence
-```
-
-The persistence format avoids Python pickle and uses explicit serialization.
-
-Persisted information includes:
-
-* Index metadata
-* Index name
-* Table name
-* Indexed column
-* Index type
-* B+Tree order
-* Unique flag
-* Tree nodes
-* Keys
-* Record IDs
-* Leaf relationships
-
-This provides the foundation for persistent index storage.
-
----
-
-# Phase 3.4 — CREATE INDEX
-
-JugaadDB added SQL support for:
-
-```sql
-CREATE INDEX index_name ON table_name (column_name);
-```
-
-Example:
-
-```sql
-CREATE INDEX students_id_idx
-ON students (id);
-```
-
-When an index is created, existing table records are indexed.
-
-The SQL pipeline becomes:
-
-```text
-CREATE INDEX
-     |
-Lexer
-     |
-Parser
-     |
-AST
-     |
-Planner
-     |
-CreateIndexPlan
-     |
-Executor
-     |
-IndexManager
-     |
-B+Tree
-```
-
----
-
-# Phase 3.5 — Automatic Index Maintenance
-
-Indexes must remain synchronized with table modifications.
-
-JugaadDB therefore introduced automatic index maintenance.
-
-## INSERT
-
-```text
-INSERT row
-   |
-Table
-   |
-Store row
-   |
-Generate Record ID
-   |
-Update indexes
-```
-
-## UPDATE
-
-When an indexed column changes:
-
-```text
-Old value
-    |
-Remove old index entry
-    |
-New value
-    |
-Insert new index entry
-```
-
-## DELETE
-
-Deleting a row also removes its corresponding index entries.
-
-Rollback logic was added around index modifications so that failed operations do not leave the table and indexes unnecessarily inconsistent.
-
----
-
-# Phase 3.6 — Index Scan
-
-The project introduced an `IndexScan` abstraction.
-
-An index scan supports:
-
-```text
-exact()
-range()
-all()
-```
-
-This separates index traversal from query execution.
-
-For example:
-
-```text
-WHERE id = 500
-```
-
-can become:
-
-```text
-Index
-  |
-Exact Search
-  |
-Record IDs
-  |
-Rows
-```
-
-instead of:
-
-```text
-Table
-  |
-Every Row
-  |
-Predicate Evaluation
-```
-
----
-
-# Phase 3.6.2 — SQL Index Scan
-
-The SQL executor was integrated with index scans.
-
-For an indexable equality condition:
-
-```sql
-SELECT *
-FROM students
-WHERE id = 500;
-```
-
-the planner can select an index.
-
-The execution path becomes:
+The current flow is:
 
 ```text
 SQL
- ↓
-AST
  ↓
 Planner
  ↓
-IndexScan
- ↓
-B+Tree
- ↓
-Record IDs
- ↓
-Rows
- ↓
-Result
-```
-
-The executor still re-evaluates predicates against the retrieved rows.
-
-This provides an important correctness property:
-
-> An index is used to find candidate rows, but the SQL predicate remains the final authority.
-
----
-
-# Phase 3.7.0 — Stable Record IDs
-
-A correctness problem was identified in the initial indexing implementation.
-
-Earlier logical record IDs were based on row positions:
-
-```text
-(page=1, row_index)
-```
-
-Deleting a row from the middle of a table could shift later rows and therefore invalidate index references.
-
-This was replaced with stable logical Record IDs.
-
-The new approach:
-
-```text
-Row
- |
-Stable Record ID
- |
-Index
-```
-
-Deleting one row no longer changes the IDs of remaining rows.
-
-New rows receive a new ID rather than reusing an old deleted ID.
-
-This is critical for reliable index maintenance.
-
----
-
-# Phase 3.7.1 — Planner Optimization
-
-The query planner was upgraded from a simple index/no-index decision to an optimizer-aware selection process.
-
-The intended architecture became:
-
-```text
-SQL
- ↓
-AST
- ↓
-Logical Plan
- ↓
-Optimizer
- ↓
-TableScan / IndexScan
- ↓
 Executor
-```
-
-The planner now examines available indexes before selecting the execution strategy.
-
-For example:
-
-```sql
-SELECT *
-FROM students
-WHERE id = 101;
-```
-
-with an index on `id` can produce:
-
-```text
-Projection
-   |
-IndexScan
-   |
-students_id_idx
-```
-
-Without an appropriate index:
-
-```text
-Projection
-   |
-Filter
-   |
-TableScan
-```
-
----
-
-# Phase 3.7.2 — Performance Benchmark
-
-A benchmark was created to compare table scanning with B+Tree index lookup.
-
-The benchmark used:
-
-```text
-Rows: 1000
-Repeated lookups: 10
-```
-
-Observed results:
-
-| Metric  | Table Scan | B+Tree Index |
-| ------- | ---------: | -----------: |
-| Average |   2.728 ms |     0.596 ms |
-| Minimum |   1.084 ms |     0.565 ms |
-| Maximum |  17.168 ms |     0.754 ms |
-
-Observed improvement:
-
-```text
-Speedup:     4.58x
-Improvement: 78.14%
-Correctness: PASS
-```
-
-These results demonstrate the benefit of indexed equality lookup within the current engine.
-
-The benchmark should not be interpreted as a production database benchmark because the current table persistence layer is still transitional and Phase 4 will replace that path with deeper physical storage integration.
-
----
-
-# Phase 3.8 — Smarter Query Optimization
-
-The final Phase 3 improvement introduced smarter predicate analysis.
-
-Previously the optimizer primarily considered simple conditions such as:
-
-```sql
-WHERE id = 500
-```
-
-The optimizer can now inspect equality predicates inside an `AND` expression.
-
-Example:
-
-```sql
-SELECT *
-FROM students
-WHERE id = 500
-AND cgpa = 9.1;
-```
-
-If an index exists on `id`, the planner can choose:
-
-```text
-IndexScan(id = 500)
-```
-
-and preserve the complete condition for final verification.
-
-If only `cgpa` is indexed:
-
-```text
-IndexScan(cgpa = 9.1)
-```
-
-is selected.
-
-The candidate rows are then rechecked against:
-
-```text
-id = 500 AND cgpa = 9.1
-```
-
-This prevents false matches.
-
----
-
-# Predicate Optimization Rules
-
-Current optimization behavior:
-
-### Equality + indexed column
-
-```sql
-WHERE id = 10
-```
-
-Uses an index when available.
-
-### AND + indexed predicate
-
-```sql
-WHERE id = 10 AND cgpa = 9.1
-```
-
-Uses an available indexable equality predicate.
-
-### AND + multiple indexed predicates
-
-The optimizer evaluates available candidates and chooses an index according to the current index scoring mechanism.
-
-### AND without indexes
-
-Falls back to:
-
-```text
-Filter
-  |
-TableScan
-```
-
-### OR
-
-A single index is not incorrectly selected for the complete OR expression.
-
-Example:
-
-```sql
-WHERE id = 10 OR cgpa = 9.1
-```
-
-currently falls back to a table scan.
-
-This is intentional because OR optimization requires a more advanced multi-index execution strategy.
-
----
-
-# Query Optimization Example
-
-Given:
-
-```sql
-CREATE INDEX students_id_idx
-ON students (id);
-```
-
-and:
-
-```sql
-SELECT *
-FROM students
-WHERE id = 2
-AND cgpa = 9.1;
-```
-
-the plan can become:
-
-```text
-Projection
-    |
-IndexScan
-    |
-students_id_idx
-    |
-id = 2
-    |
-Candidate Record IDs
-    |
-Rows
-    |
-Full predicate verification
-    |
-Result
-```
-
-This combines:
-
-* Index-based candidate retrieval
-* Stable Record IDs
-* Full predicate validation
-
----
-
-# Testing
-
-JugaadDB follows a test-driven incremental development approach.
-
-At the completion of Phase 3:
-
-```text
-424 passed
-```
-
-The test suite covers multiple layers:
-
-```text
-Core
-Relational
-Storage
-SQL
-Indexing
-Query Planning
-Query Execution
-Persistence
-B+Tree Structure
-Index Maintenance
-Stable Record IDs
-Query Optimization
-```
-
-Run the complete suite using:
-
-```bash
-python -m pytest -q
-```
-
-Expected Phase 3 status:
-
-```text
-424 passed
-```
-
----
-
-# Example Usage
-
-```python
-from jugaaddb.core.database import Database
-
-db = Database.open("college.jdb")
-
-db.execute("""
-CREATE TABLE students (
-    id INTEGER PRIMARY KEY NOT NULL,
-    name TEXT NOT NULL,
-    cgpa FLOAT NOT NULL
-);
-""")
-
-db.execute("""
-INSERT INTO students (id, name, cgpa)
-VALUES (1, 'Sayman', 8.5);
-""")
-
-db.execute("""
-CREATE INDEX students_id_idx
-ON students (id);
-""")
-
-result = db.execute("""
-SELECT *
-FROM students
-WHERE id = 1;
-""")
-
-print(result.rows)
-```
-
----
-
-# Current Design Principles
-
-JugaadDB follows several important design principles.
-
-## No Existing Database Engine
-
-The project does not depend on SQLite, PostgreSQL, MySQL, MongoDB, or another database engine for its core functionality.
-
-## Modular Architecture
-
-Each subsystem has a separate responsibility.
-
-```text
-SQL
-Storage
-Indexing
-Relational
-Core
-```
-
-are designed as independent modules.
-
-## Explicit Serialization
-
-Important persistent structures use explicit binary serialization instead of Python pickle.
-
-## Stable Identifiers
-
-Indexes reference stable Record IDs rather than mutable row positions.
-
-## Correctness Before Optimization
-
-Indexes are used to retrieve candidates, but predicates can still be re-evaluated before producing final results.
-
-## Incremental Engineering
-
-The database is being built in stages rather than attempting all database features simultaneously.
-
----
-
-# Current Limitations
-
-Phase 3 is complete, but JugaadDB is not yet a production database.
-
-Current limitations include:
-
-* Table storage is still transitional.
-* The physical RecordManager is not yet the primary SQL table-storage path.
-* Full Buffer Pool integration is not yet complete.
-* Persistent indexes are not yet fully integrated into database reopen/recovery.
-* Transactions are not implemented yet.
-* WAL is not implemented yet.
-* Crash recovery is not implemented yet.
-* Concurrent transactions are not implemented yet.
-* Multi-index OR optimization is not implemented yet.
-* Cost-based query optimization is not yet implemented.
-* Full physical page lifecycle management is still planned.
-* NoSQL storage is planned but not yet implemented.
-* Security and RBAC are planned but not yet implemented.
-
-These limitations are intentional milestones in the roadmap rather than hidden assumptions.
-
----
-
-# Roadmap
-
-## Phase 4 — Physical Storage Integration
-
-Planned architecture:
-
-```text
+ ↓
 Table
+ ↓
+PhysicalTable
+ ↓
+BufferPool
  ↓
 RecordManager
  ↓
 SlottedPage
  ↓
-Buffer/Page Cache
- ↓
 FileManager
  ↓
-.jdb
+Physical File
 ```
 
-Goals:
+This means SQL operations are no longer only logical in-memory operations. They are connected to persistent physical records.
 
-* Replace transitional table persistence
-* Integrate physical Record IDs
-* Connect table operations to RecordManager
-* Page-level reads/writes
-* Buffer management
-* Dirty-page tracking
-* Page eviction
-* Physical row reconstruction
-* Storage-level persistence
+## Current Phase Roadmap
 
----
+### Phase 1 - Persistence Foundation
 
-## Phase 5 — Transactions and Recovery
+* database creation
+* database opening
+* schema
+* tables
+* logical rows
+* CRUD
+* basic persistence
 
-Planned:
+Status:
+
+```text
+COMPLETE
+```
+
+### Phase 1.5 - Physical Record Foundation
+
+* pages
+* file manager
+* record serializer
+* record codec
+* slotted pages
+* record manager
+
+Status:
+
+```text
+COMPLETE
+```
+
+### Phase 2 - SQL Engine
+
+* lexer
+* parser
+* AST
+* planner
+* executor
+* SQL semantics
+* SQL integration
+
+Status:
+
+```text
+COMPLETE
+```
+
+### Phase 3 - Indexing and Optimization
+
+* index abstraction
+* memory indexes
+* B+Tree
+* B+Tree deletion
+* persistent indexes
+* CREATE INDEX
+* automatic index maintenance
+* index scans
+* stable Record IDs
+* planner optimization
+* benchmarking
+* smarter query optimization
+
+Status:
+
+```text
+COMPLETE
+```
+
+### Phase 4 - Physical Storage Integration
+
+* physical table foundation
+* physical INSERT
+* physical SELECT
+* physical UPDATE
+* physical DELETE
+* catalog integration
+* buffer pool
+* dirty page management
+* buffer pool hardening
+* physical RecordID integration
+* storage persistence and reopen
+* SQL + index integration
+* complete physical storage regression
+
+Status:
+
+```text
+COMPLETE
+
+594 tests passed
+```
+
+### Phase 5 - Transactions and Recovery
+
+Planned components:
 
 ```text
 Transaction Manager
-WAL
-Commit
-Rollback
-Recovery
+       ↓
+Transaction IDs
+       ↓
+BEGIN / COMMIT / ROLLBACK
+       ↓
+Write-Ahead Log
+       ↓
+Undo / Recovery
+       ↓
+Crash Recovery
 ```
 
----
-
-## Phase 6 — NoSQL Engine
-
-Planned support for:
+Planned milestones:
 
 ```text
-Document Model
-Key-Value Model
+5.1 Transaction Foundation
+5.2 Transaction IDs and States
+5.3 BEGIN / COMMIT / ROLLBACK
+5.4 WAL Foundation
+5.5 WAL Record Format
+5.6 WAL Persistence
+5.7 Physical Change Logging
+5.8 Undo / Rollback
+5.9 Crash Recovery
+5.10 Recovery on Database Reopen
+5.11 Transaction + Index Consistency
+5.12 Full Transaction Regression
 ```
 
----
-
-## Phase 7 — Security
-
-Planned:
+### Future Phases
 
 ```text
-Authentication
-RBAC
-Permissions
-Encryption
-Audit Logging
+Phase 6  - NoSQL Document / Key-Value Engine
+Phase 7  - Security and RBAC
+Phase 8  - API / CLI / GUI
+Phase 9  - Benchmarking and Documentation
+Phase 10 - Deployment and Demonstration
 ```
 
----
+## Project Goals
 
-## Phase 8 — API and Interfaces
+The long-term goal of JugaadDB is to evolve from a student database project into a complete educational database engine demonstrating:
 
-Planned:
+* database architecture
+* SQL processing
+* storage management
+* indexing
+* query optimization
+* transactions
+* recovery
+* NoSQL concepts
+* security
+* APIs
+* performance engineering
+
+## Technology Stack
 
 ```text
-CLI
-REST API
-GUI
+Language        Python
+Testing         pytest
+Storage         Custom binary page storage
+Query Language  Custom SQL engine
+Indexing        Custom B+Tree
+Caching         Custom Buffer Pool
+Serialization   Custom binary serialization
+Version Control Git
 ```
 
----
+## Design Principles
 
-## Phase 9 — Benchmarking and Documentation
+JugaadDB follows these principles:
 
-Planned:
+1. Build core database mechanisms from scratch.
+2. Avoid external database engines as storage backends.
+3. Keep the storage layer independent from the SQL layer.
+4. Maintain stable physical Record IDs.
+5. Persist important database state.
+6. Validate internal structures aggressively.
+7. Add every major feature with regression tests.
+8. Preserve backward compatibility as the engine evolves.
+9. Prefer deterministic behavior.
+10. Keep the architecture extensible for future SQL and NoSQL functionality.
 
-* Query benchmarks
-* Storage benchmarks
-* Index benchmarks
-* Transaction benchmarks
-* Comparison experiments
-* Technical documentation
-* Architecture diagrams
+## Testing
 
----
+Run the complete test suite:
 
-## Phase 10 — Cloud Demonstration
+```bash
+python -m pytest -q
+```
 
-Optional deployment for demonstration purposes.
-
-The core database remains designed to run locally without paid infrastructure.
-
----
-
-# Educational Value
-
-JugaadDB is intended as a practical database-engineering project.
-
-It demonstrates concepts that are normally hidden behind database APIs:
+Current result:
 
 ```text
-How pages work
-How records are serialized
-How schemas are validated
-How SQL becomes an AST
-How queries become plans
-How indexes locate records
-How B+Trees split and merge
-How indexes remain synchronized
-Why stable record IDs matter
-How query planners choose execution strategies
-How indexed queries can outperform table scans
+594 passed
 ```
 
-Instead of only using:
+Run storage regression tests:
 
-```python
-database.query(...)
+```bash
+python -m pytest tests/storage/test_phase4_full_regression.py -q
 ```
 
-the project investigates what happens internally before and after that call.
-
----
-
-# Phase 3 Achievement
-
-Phase 3 establishes a complete indexing and initial query-optimization subsystem.
-
-The major achievement is the transition from:
+## Project Structure
 
 ```text
-SQL
- ↓
-Table Scan
+JugaadDB/
+├── jugaaddb/
+│   ├── core/
+│   ├── indexing/
+│   ├── relational/
+│   ├── sql/
+│   └── storage/
+│       ├── buffer_pool.py
+│       ├── constants.py
+│       ├── engine.py
+│       ├── file_manager.py
+│       ├── page.py
+│       ├── physical_table.py
+│       ├── record.py
+│       ├── record_codec.py
+│       ├── record_manager.py
+│       └── slotted_page.py
+│
+├── tests/
+│   ├── indexing/
+│   ├── sql/
+│   └── storage/
+│
+├── docs/
+│   └── THESIS_PHASE_3.md
+│
+└── README.md
 ```
 
-to:
+## Author
 
-```text
-SQL
- ↓
-Parser
- ↓
-Planner
- ↓
-Optimizer
- ↓
-Index Scan / Table Scan
- ↓
-B+Tree / Table
- ↓
-Stable Record IDs
- ↓
-Result
-```
+Built as a ground-up database engineering project in Python.
 
-with:
+**JugaadDB**
 
-```text
-424 tests passing
-4.58x measured indexed lookup speedup
-78.14% measured improvement
-```
-
-Phase 3 is therefore considered **complete and frozen**.
-
----
-
-# License
-
-This project is intended as an educational and engineering project.
-
-See `LICENSE` for the applicable license.
+> From SQL statements to physical pages — built from scratch.
